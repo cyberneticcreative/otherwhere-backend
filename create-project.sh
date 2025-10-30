@@ -50,7 +50,7 @@ OPENAI_MODEL=gpt-4-turbo-preview
 # Twilio Configuration
 TWILIO_ACCOUNT_SID=your_account_sid
 TWILIO_AUTH_TOKEN=your_auth_token
-TWILIO_PHONE_NUMBER=+12568185323
+TWILIO_PHONE_NUMBER=+19789179795
 
 # ElevenLabs Configuration
 ELEVENLABS_API_KEY=your_elevenlabs_key

@@ -1,5 +1,5 @@
 const twilioService = require('../services/twilioService');
-const openaiService = require('../services/openaiService');
+const llmService = require('../services/llmService');
 const elevenLabsService = require('../services/elevenLabsService');
 const n8nService = require('../services/n8nService');
 const sessionManager = require('../services/sessionManager');
@@ -45,23 +45,23 @@ class SMSController {
             "I'm processing your request. Let me help you with that.";
 
         } catch (error) {
-          console.error('ElevenLabs error, falling back to OpenAI:', error);
-          // Fall back to OpenAI
-          const openaiResponse = await openaiService.generateResponse(
+          console.error('ElevenLabs error, falling back to LLM:', error);
+          // Fall back to LLM
+          const llmResponse = await llmService.generateResponse(
             session.conversationHistory,
             body
           );
-          responseText = openaiResponse.text;
-          tripSearchData = openaiResponse.tripSearch;
+          responseText = llmResponse.text;
+          tripSearchData = llmResponse.tripSearch;
         }
       } else {
-        // Use OpenAI directly
-        const openaiResponse = await openaiService.generateResponse(
+        // Use LLM directly
+        const llmResponse = await llmService.generateResponse(
           session.conversationHistory,
           body
         );
-        responseText = openaiResponse.text;
-        tripSearchData = openaiResponse.tripSearch;
+        responseText = llmResponse.text;
+        tripSearchData = llmResponse.tripSearch;
       }
 
       // Add assistant response to conversation history

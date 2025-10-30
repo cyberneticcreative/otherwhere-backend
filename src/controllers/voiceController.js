@@ -1,5 +1,5 @@
 const twilioService = require('../services/twilioService');
-const openaiService = require('../services/openaiService');
+const llmService = require('../services/llmService');
 const elevenLabsService = require('../services/elevenLabsService');
 const n8nService = require('../services/n8nService');
 const sessionManager = require('../services/sessionManager');
@@ -124,15 +124,15 @@ class VoiceController {
         content: speechResult
       });
 
-      // Generate response using OpenAI
-      const openaiResponse = await openaiService.generateResponse(
+      // Generate response using LLM
+      const llmResponse = await llmService.generateResponse(
         session.conversationHistory,
         speechResult,
         { maxTokens: 300 } // Shorter for voice
       );
 
-      const responseText = openaiResponse.text;
-      const tripSearchData = openaiResponse.tripSearch;
+      const responseText = llmResponse.text;
+      const tripSearchData = llmResponse.tripSearch;
 
       // Add assistant response to conversation history
       await sessionManager.addMessage(from, {

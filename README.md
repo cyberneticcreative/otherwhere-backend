@@ -80,7 +80,7 @@ OPENAI_MODEL=gpt-4-turbo-preview
 # Twilio Configuration
 TWILIO_ACCOUNT_SID=your_account_sid
 TWILIO_AUTH_TOKEN=your_auth_token
-TWILIO_PHONE_NUMBER=+12568185323
+TWILIO_PHONE_NUMBER=+19789179795
 
 # ElevenLabs Configuration (Optional)
 ELEVENLABS_API_KEY=your_elevenlabs_key
@@ -169,7 +169,7 @@ Sessions are stored in-memory by default or in Redis for production use. Each se
 - Channel information (SMS/Voice)
 - Agent IDs for ElevenLabs integration
 
-Sessions expire after 60 minutes of inactivity and are automatically cleaned up.
+Sessions expire after 30 minutes of inactivity and are automatically cleaned up.
 
 ## Environment Variables
 
