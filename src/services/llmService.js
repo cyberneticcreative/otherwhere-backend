@@ -68,7 +68,6 @@ class OpenAIService {
       const completion = await openai.chat.completions.create({
         model: MODEL,
         messages,
-        temperature: options.temperature || 0.7,
         max_completion_tokens: options.maxTokens || 500,
         presence_penalty: 0.6,
         frequency_penalty: 0.3
@@ -125,7 +124,6 @@ class OpenAIService {
       const completion = await openai.chat.completions.create({
         model: 'gpt-3.5-turbo',
         messages,
-        temperature: 0.5,
         max_completion_tokens: 200
       });
 
@@ -166,7 +164,6 @@ Format:
             content: text
           }
         ],
-        temperature: 0.3,
         response_format: { type: 'json_object' }
       });
 
