@@ -27,13 +27,22 @@ class TwilioService {
     }
 
     try {
-      const message = await client.messages.create({
+      const messageParams = {
         body,
         from: twilioPhoneNumber,
         to,
-        statusCallback: options.statusCallback || process.env.BACKEND_WEBHOOK_URL + '/sms/status',
         ...options
-      });
+      };
+
+      // Only add statusCallback if we have a valid public URL
+      const backendUrl = process.env.BACKEND_WEBHOOK_URL;
+      if (options.statusCallback) {
+        messageParams.statusCallback = options.statusCallback;
+      } else if (backendUrl && !backendUrl.includes('localhost') && !backendUrl.includes('127.0.0.1')) {
+        messageParams.statusCallback = backendUrl + '/sms/status';
+      }
+
+      const message = await client.messages.create(messageParams);
 
       console.log(`📱 SMS sent to ${to}: ${message.sid}`);
       return message;
@@ -50,7 +59,7 @@ class TwilioService {
    * @param {number} chunkSize - Max characters per message
    * @returns {Promise<Array>} Array of message objects
    */
-  async sendLongSMS(to, body, chunkSize = 1600) {
+  async sendLongSMS(to, body, chunkSize = 320) {
     const chunks = this.splitMessage(body, chunkSize);
     const messages = [];
 
@@ -117,14 +126,24 @@ class TwilioService {
     }
 
     try {
-      const call = await client.calls.create({
+      const callParams = {
         to,
         from: twilioPhoneNumber,
         url,
-        statusCallback: options.statusCallback || process.env.BACKEND_WEBHOOK_URL + '/voice/status',
-        statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
         ...options
-      });
+      };
+
+      // Only add statusCallback if we have a valid public URL
+      const backendUrl = process.env.BACKEND_WEBHOOK_URL;
+      if (options.statusCallback) {
+        callParams.statusCallback = options.statusCallback;
+        callParams.statusCallbackEvent = options.statusCallbackEvent || ['initiated', 'ringing', 'answered', 'completed'];
+      } else if (backendUrl && !backendUrl.includes('localhost') && !backendUrl.includes('127.0.0.1')) {
+        callParams.statusCallback = backendUrl + '/voice/status';
+        callParams.statusCallbackEvent = ['initiated', 'ringing', 'answered', 'completed'];
+      }
+
+      const call = await client.calls.create(callParams);
 
       console.log(`📞 Call initiated to ${to}: ${call.sid}`);
       return call;
@@ -182,7 +201,7 @@ class TwilioService {
    * @param {number} chunkSize - Max size per chunk
    * @returns {Array<string>} Message chunks
    */
-  splitMessage(message, chunkSize = 1600) {
+  splitMessage(message, chunkSize = 320) {
     const chunks = [];
     let currentChunk = '';
 

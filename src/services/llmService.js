@@ -44,7 +44,7 @@ const SYSTEM_PROMPT = `You are Otherwhere, an AI travel concierge assistant. You
 
 5. If the user's message is unclear, ask for clarification rather than making assumptions.
 
-6. Keep responses concise, especially for SMS (under 1600 characters when possible).`;
+6. Keep responses concise, especially for SMS (under 320 characters when possible).`;
 
 class OpenAIService {
   /**
@@ -69,7 +69,7 @@ class OpenAIService {
         model: MODEL,
         messages,
         temperature: options.temperature || 0.7,
-        max_tokens: options.maxTokens || 500,
+        max_completion_tokens: options.maxTokens || 500,
         presence_penalty: 0.6,
         frequency_penalty: 0.3
       });
@@ -126,7 +126,7 @@ class OpenAIService {
         model: 'gpt-3.5-turbo',
         messages,
         temperature: 0.5,
-        max_tokens: 200
+        max_completion_tokens: 200
       });
 
       return completion.choices[0].message.content;
