@@ -145,19 +145,14 @@ class RealtimeService {
     openaiWs.on('open', () => {
       console.log(`✅ Connected to OpenAI Realtime API`);
 
-      // Send session configuration
+      // When using a prompt, don't override with session.update
+      // The prompt already contains voice, instructions, etc.
+      // Just set audio formats for Twilio compatibility
       openaiWs.send(JSON.stringify({
         type: 'session.update',
         session: {
-          turn_detection: {
-            type: 'server_vad'
-          },
           input_audio_format: 'g711_ulaw',
-          output_audio_format: 'g711_ulaw',
-          voice: 'verse',
-          instructions: 'You are Otherwhere, an AI travel concierge. Help users plan amazing trips.',
-          modalities: ['text', 'audio'],
-          temperature: 0.8
+          output_audio_format: 'g711_ulaw'
         }
       }));
     });
