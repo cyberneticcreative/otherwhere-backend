@@ -74,39 +74,16 @@ app.use(errorHandler);
 // Set up WebSocket server for OpenAI Realtime API
 const wss = new WebSocket.Server({ server, path: '/voice/media-stream' });
 
-wss.on('connection', (ws, req) => {
+wss.on('connection', async (ws, req) => {
   console.log('🔌 WebSocket connection established');
 
-  // Extract parameters from the connection
-  let callSid = null;
-  let from = null;
-
-  ws.on('message', async (message) => {
-    try {
-      const msg = JSON.parse(message);
-
-      // Extract call parameters from Twilio's start event
-      if (msg.event === 'start') {
-        callSid = msg.start.callSid;
-        from = msg.start.customParameters?.from || msg.start.customParameters?.From;
-
-        console.log(`📞 Media stream started for call ${callSid} from ${from}`);
-
-        // Initialize OpenAI Realtime API connection
-        await realtimeService.handleMediaStream(ws, callSid, from);
-      }
-    } catch (error) {
-      console.error('Error handling WebSocket message:', error);
-    }
-  });
-
-  ws.on('error', (error) => {
-    console.error('WebSocket error:', error);
-  });
-
-  ws.on('close', () => {
-    console.log(`📴 WebSocket connection closed for ${callSid || 'unknown'}`);
-  });
+  try {
+    // Let realtimeService handle all the WebSocket logic
+    await realtimeService.handleMediaStream(ws);
+  } catch (error) {
+    console.error('Error setting up Realtime service:', error);
+    ws.close();
+  }
 });
 
 // Start server - bind to 0.0.0.0 for Railway/Docker compatibility
