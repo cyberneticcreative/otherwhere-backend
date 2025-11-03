@@ -155,6 +155,15 @@ class RealtimeService {
           output_audio_format: 'g711_ulaw'
         }
       }));
+
+      // Trigger auto-greeting by creating a response
+      // This makes the AI speak first when the call connects
+      setTimeout(() => {
+        openaiWs.send(JSON.stringify({
+          type: 'response.create'
+        }));
+        console.log('🎤 Triggered AI greeting');
+      }, 500);
     });
 
     // Handle messages from OpenAI
