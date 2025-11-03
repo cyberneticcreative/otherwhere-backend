@@ -22,7 +22,7 @@ class RealtimeService {
       const response = await axios.post(
         'https://api.openai.com/v1/realtime/sessions',
         {
-          model: 'gpt-4o-realtime-preview-2024-12-17',
+          model: 'gpt-realtime',
           voice: 'verse',
           prompt: {
             id: OPENAI_PROMPT_ID,
