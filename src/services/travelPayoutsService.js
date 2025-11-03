@@ -1,7 +1,7 @@
 const axios = require('axios');
 
 const TRAVELPAYOUTS_TOKEN = process.env.TRAVELPAYOUTS_TOKEN;
-const TRAVELPAYOUTS_ID = process.env.TRAVELPAYOUTS_ID;
+const AVIASALES_MARKER = process.env.AVIASALES_MARKER;
 
 class TravelPayoutsService {
   /**
@@ -10,7 +10,7 @@ class TravelPayoutsService {
    * @returns {Promise<Object>} Flight search results
    */
   async searchFlights(tripData) {
-    if (!TRAVELPAYOUTS_TOKEN || !TRAVELPAYOUTS_ID) {
+    if (!TRAVELPAYOUTS_TOKEN || !AVIASALES_MARKER) {
       throw new Error('TravelPayouts credentials not configured');
     }
 
@@ -38,7 +38,7 @@ class TravelPayoutsService {
         sorting: 'price',
         limit: 5,
         token: TRAVELPAYOUTS_TOKEN,
-        marker: TRAVELPAYOUTS_ID // Your affiliate marker for commission tracking
+        marker: AVIASALES_MARKER // Aviasales affiliate marker for commission tracking
       };
 
       const response = await axios.get(apiUrl, {
@@ -151,15 +151,15 @@ class TravelPayoutsService {
    * @returns {string} Affiliate link
    */
   generateAffiliateLink(flight, tripData) {
-    if (!TRAVELPAYOUTS_ID) {
+    if (!AVIASALES_MARKER) {
       return null;
     }
 
     // Use the link from API response if available
     if (flight.link) {
-      // Ensure our marker is in the URL
+      // Ensure our Aviasales marker is in the URL
       const url = new URL(flight.link);
-      url.searchParams.set('marker', TRAVELPAYOUTS_ID);
+      url.searchParams.set('marker', AVIASALES_MARKER);
       return url.toString();
     }
 
@@ -171,7 +171,7 @@ class TravelPayoutsService {
 
     // Aviasales affiliate link format
     let link = `https://www.aviasales.com/search/${origin}${depart}${dest}${returnDate}`;
-    link += `?marker=${TRAVELPAYOUTS_ID}`;
+    link += `?marker=${AVIASALES_MARKER}`;
 
     return link;
   }
@@ -218,7 +218,7 @@ class TravelPayoutsService {
    * @returns {boolean} True if configured
    */
   isConfigured() {
-    return !!(TRAVELPAYOUTS_TOKEN && TRAVELPAYOUTS_ID);
+    return !!(TRAVELPAYOUTS_TOKEN && AVIASALES_MARKER);
   }
 }
 
