@@ -26,19 +26,16 @@ class TravelPayoutsService {
       console.log(`📅 Dates: ${startDate} to ${endDate || 'one-way'}`);
       console.log(`👥 Travelers: ${travelers || 1}`);
 
-      // TravelPayouts API - using their cheapest flights endpoint
-      const apiUrl = 'https://api.travelpayouts.com/aviasales/v3/prices_for_dates';
+      // TravelPayouts API v2 - has more cached data than v3
+      // Using latest prices endpoint which returns actual cached flight data
+      const apiUrl = 'https://api.travelpayouts.com/v2/prices/latest';
 
       const params = {
         origin: originCity,
         destination: destCity,
-        departure_at: startDate,
-        return_at: endDate || undefined,
-        currency: budget?.currency || 'CAD',
-        sorting: 'price',
-        limit: 5,
+        currency: budget?.currency || 'USD',
         token: TRAVELPAYOUTS_TOKEN,
-        marker: AVIASALES_MARKER // Aviasales affiliate marker for commission tracking
+        limit: 10 // Get more results to filter
       };
 
       const response = await axios.get(apiUrl, {
@@ -48,7 +45,7 @@ class TravelPayoutsService {
 
       console.log(`✅ Found ${response.data.data?.length || 0} flight options`);
 
-      // Format the results
+      // Format the results and add affiliate markers
       const flights = this.formatFlightResults(response.data.data || [], tripData);
 
       return {
@@ -123,23 +120,26 @@ class TravelPayoutsService {
       return [];
     }
 
-    return flights.slice(0, 5).map((flight, index) => {
-      const price = flight.price || flight.value || 0;
-      const currency = tripData.budget?.currency || 'CAD';
+    // Sort by price (v2 API uses 'value' field)
+    const sorted = flights.sort((a, b) => (a.value || 0) - (b.value || 0));
+
+    return sorted.slice(0, 5).map((flight, index) => {
+      const price = flight.value || flight.price || 0;
+      const currency = (tripData.budget?.currency || 'USD').toUpperCase();
 
       // Generate affiliate booking link
       const affiliateLink = this.generateAffiliateLink(flight, tripData);
 
       return {
         rank: index + 1,
-        price: `${currency} ${price}`,
+        price: `$${price} ${currency}`,
         priceValue: price,
-        airline: flight.airline || 'Unknown',
-        departure: flight.departure_at || tripData.startDate,
-        returnDate: flight.return_at || tripData.endDate,
-        link: affiliateLink || flight.link,
+        airline: flight.airline || 'Various',
+        departure: flight.depart_date || tripData.startDate,
+        returnDate: flight.return_date || tripData.endDate,
+        link: affiliateLink,
         duration: flight.duration || null,
-        transfers: flight.transfers || 0
+        transfers: flight.number_of_changes || 0
       };
     });
   }
