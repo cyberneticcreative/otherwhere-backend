@@ -53,14 +53,6 @@ class SMSController {
           tripSearchData = assistantResponse.tripSearch;
           flightResults = assistantResponse.flightResults;
 
-          // If we have flight results, format them nicely!
-          if (flightResults && flightResults.flights && flightResults.flights.length > 0) {
-            const flightMessage = travelPayoutsService.formatSMSMessage(flightResults);
-            // Combine assistant response with flight results
-            responseText = `${responseText}\n\n${flightMessage}`;
-            console.log('✈️ Formatted flight results for SMS');
-          }
-
         } catch (error) {
           console.error('Assistant error, falling back to LLM:', error);
           // Fall back to LLM
@@ -89,6 +81,22 @@ class SMSController {
 
       // Send response via SMS
       await twilioService.sendLongSMS(from, responseText);
+
+      // If we have flight results, send them as a separate SMS
+      if (flightResults && flightResults.flights && flightResults.flights.length > 0) {
+        console.log('✈️ Sending flight results as separate SMS...');
+        const flightMessage = travelPayoutsService.formatSMSMessage(flightResults);
+
+        // Send flight details as a second SMS (after a brief delay for better UX)
+        setTimeout(async () => {
+          try {
+            await twilioService.sendLongSMS(from, flightMessage);
+            console.log('✅ Flight results SMS sent');
+          } catch (smsError) {
+            console.error('❌ Failed to send flight results SMS:', smsError);
+          }
+        }, 2000); // 2 second delay
+      }
 
       // Send TwiML response to Twilio
       res.type('text/xml');
