@@ -63,8 +63,8 @@ if (process.env.NODE_ENV === 'development') {
 // Error handling middleware (must be last)
 app.use(errorHandler);
 
-// Start server
-app.listen(PORT, () => {
+// Start server - bind to 0.0.0.0 for Railway/Docker compatibility
+app.listen(PORT, '0.0.0.0', () => {
   console.log('🚀 Otherwhere Backend running on port ' + PORT);
   console.log('📱 SMS webhook: http://localhost:' + PORT + '/sms/inbound');
   console.log('📞 Voice webhook: http://localhost:' + PORT + '/voice/inbound');
