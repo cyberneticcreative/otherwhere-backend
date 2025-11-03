@@ -58,7 +58,7 @@ class SessionManager {
       context: {},
       tripDetails: null,
       channel: null, // 'sms' or 'voice'
-      agentId: null, // ElevenLabs agent ID if applicable
+      threadId: null, // OpenAI Assistant thread ID
       createdAt: new Date().toISOString(),
       lastActivity: new Date().toISOString()
     };

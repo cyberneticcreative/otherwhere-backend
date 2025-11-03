@@ -1,7 +1,7 @@
 const twilioService = require('../services/twilioService');
 const llmService = require('../services/llmService');
-const elevenLabsService = require('../services/elevenLabsService');
-const n8nService = require('../services/n8nService');
+const assistantService = require('../services/assistantService');
+const travelPayoutsService = require('../services/travelPayoutsService');
 const sessionManager = require('../services/sessionManager');
 
 class SMSController {
@@ -26,26 +26,43 @@ class SMSController {
         content: body
       });
 
-      // Decide whether to use ElevenLabs or OpenAI
-      const useElevenLabs = elevenLabsService.isConfigured() && session.agentId;
+      // Decide whether to use OpenAI Assistant or direct LLM
+      const useAssistant = assistantService.isConfigured();
 
       let responseText;
       let tripSearchData = null;
+      let flightResults = null;
 
-      if (useElevenLabs) {
-        // Use ElevenLabs conversational AI
+      if (useAssistant) {
+        // Use OpenAI Assistant
         try {
-          const agentResponse = await elevenLabsService.sendTextMessage(
-            body,
-            session.agentId,
-            { userId: from, channel: 'sms' }
+          // Create thread if it doesn't exist
+          if (!session.threadId) {
+            const threadId = await assistantService.createThread();
+            await sessionManager.updateSession(from, { threadId });
+            session.threadId = threadId;
+          }
+
+          // Send message to assistant
+          const assistantResponse = await assistantService.sendMessage(
+            session.threadId,
+            body
           );
 
-          responseText = agentResponse.message || agentResponse.response ||
-            "I'm processing your request. Let me help you with that.";
+          responseText = assistantResponse.text;
+          tripSearchData = assistantResponse.tripSearch;
+          flightResults = assistantResponse.flightResults;
+
+          // If we have flight results, format them nicely!
+          if (flightResults && flightResults.flights && flightResults.flights.length > 0) {
+            const flightMessage = travelPayoutsService.formatSMSMessage(flightResults);
+            // Combine assistant response with flight results
+            responseText = `${responseText}\n\n${flightMessage}`;
+            console.log('✈️ Formatted flight results for SMS');
+          }
 
         } catch (error) {
-          console.error('ElevenLabs error, falling back to LLM:', error);
+          console.error('Assistant error, falling back to LLM:', error);
           // Fall back to LLM
           const llmResponse = await llmService.generateResponse(
             session.conversationHistory,
@@ -69,27 +86,6 @@ class SMSController {
         role: 'assistant',
         content: responseText
       });
-
-      // If trip search data is present, trigger n8n workflow
-      if (tripSearchData && n8nService.isConfigured()) {
-        try {
-          await n8nService.triggerTripSearch(tripSearchData, from, session.id);
-
-          // Update session with trip details
-          await sessionManager.updateSession(from, {
-            tripDetails: tripSearchData,
-            context: { ...session.context, tripSearchInitiated: true }
-          });
-
-          // Add a note about trip search
-          if (!responseText.toLowerCase().includes('search')) {
-            responseText += "\n\nI'm searching for the best options for your trip now. I'll get back to you shortly with some great recommendations!";
-          }
-        } catch (n8nError) {
-          console.error('n8n workflow error:', n8nError);
-          responseText += "\n\nI'm working on finding options for you. This might take a moment.";
-        }
-      }
 
       // Send response via SMS
       await twilioService.sendLongSMS(from, responseText);

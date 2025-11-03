@@ -1,12 +1,13 @@
 const twilioService = require('../services/twilioService');
 const llmService = require('../services/llmService');
-const elevenLabsService = require('../services/elevenLabsService');
+const assistantService = require('../services/assistantService');
+const realtimeService = require('../services/realtimeService');
 const n8nService = require('../services/n8nService');
 const sessionManager = require('../services/sessionManager');
 
 class VoiceController {
   /**
-   * Handle inbound voice calls
+   * Handle inbound voice calls with OpenAI Realtime API
    * @param {Object} req - Express request
    * @param {Object} res - Express response
    */
@@ -23,36 +24,40 @@ class VoiceController {
         context: { ...session.context, currentCallSid: callSid }
       });
 
-      // Check if we should use ElevenLabs voice agent
-      const useElevenLabs = elevenLabsService.isConfigured() &&
-        elevenLabsService.getAgentIds().voiceAgent;
+      // Use OpenAI Realtime API for voice streaming
+      if (realtimeService.isConfigured()) {
+        // Generate TwiML to connect Twilio's audio stream to our WebSocket
+        const protocol = process.env.NODE_ENV === 'production' ? 'wss' : 'ws';
+        const host = process.env.RAILWAY_PUBLIC_DOMAIN || process.env.BACKEND_WEBHOOK_URL?.replace('https://', '').replace('/webhook', '') || 'localhost:3000';
+        const websocketUrl = `${protocol}://${host}/voice/media-stream`;
 
-      if (useElevenLabs) {
-        // Hand off to ElevenLabs voice agent
-        try {
-          const agentId = elevenLabsService.getAgentIds().voiceAgent;
-          await sessionManager.updateSession(from, { agentId });
+        const twiml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Connect>
+    <Stream url="${websocketUrl}">
+      <Parameter name="callSid" value="${callSid}" />
+      <Parameter name="from" value="${from}" />
+    </Stream>
+  </Connect>
+</Response>`;
 
-          // Note: ElevenLabs handles the voice interaction directly
-          // Send a simple greeting and let ElevenLabs take over
-          const greeting = "Hello! I'm Otherwhere, your AI travel concierge. How can I help you plan your next adventure?";
+        console.log(`🔌 Connecting call to WebSocket: ${websocketUrl}`);
 
-          const twiml = twilioService.generateVoiceResponse(greeting, {
-            gather: true,
-            gatherAction: '/voice/process-speech'
-          });
-
-          res.type('text/xml');
-          res.send(twiml);
-
-        } catch (error) {
-          console.error('ElevenLabs voice error:', error);
-          // Fall back to standard voice handling
-          this.handleStandardVoiceGreeting(req, res);
-        }
+        res.type('text/xml');
+        res.send(twiml);
       } else {
-        // Standard voice handling with Twilio + OpenAI
-        this.handleStandardVoiceGreeting(req, res);
+        // Fallback to standard voice handling
+        const greeting = "Hello! Welcome to Otherwhere, your AI travel concierge. " +
+          "I can help you plan amazing trips. Tell me, where would you like to go?";
+
+        const twiml = twilioService.generateVoiceResponse(greeting, {
+          gather: true,
+          gatherAction: '/voice/process-speech',
+          speechTimeout: 'auto'
+        });
+
+        res.type('text/xml');
+        res.send(twiml);
       }
 
     } catch (error) {
@@ -66,25 +71,6 @@ class VoiceController {
       res.type('text/xml');
       res.send(errorResponse);
     }
-  }
-
-  /**
-   * Handle standard voice greeting (without ElevenLabs)
-   * @param {Object} req - Express request
-   * @param {Object} res - Express response
-   */
-  handleStandardVoiceGreeting(req, res) {
-    const greeting = "Hello! Welcome to Otherwhere, your AI travel concierge. " +
-      "I can help you plan amazing trips. Tell me, where would you like to go?";
-
-    const twiml = twilioService.generateVoiceResponse(greeting, {
-      gather: true,
-      gatherAction: '/voice/process-speech',
-      speechTimeout: 'auto'
-    });
-
-    res.type('text/xml');
-    res.send(twiml);
   }
 
   /**
@@ -124,15 +110,49 @@ class VoiceController {
         content: speechResult
       });
 
-      // Generate response using LLM
-      const llmResponse = await llmService.generateResponse(
-        session.conversationHistory,
-        speechResult,
-        { maxTokens: 300 } // Shorter for voice
-      );
+      // Generate response using OpenAI Assistant or LLM
+      let responseText;
+      let tripSearchData = null;
 
-      const responseText = llmResponse.text;
-      const tripSearchData = llmResponse.tripSearch;
+      if (assistantService.isConfigured()) {
+        try {
+          // Create thread if it doesn't exist
+          if (!session.threadId) {
+            const threadId = await assistantService.createThread();
+            await sessionManager.updateSession(from, { threadId });
+            session.threadId = threadId;
+          }
+
+          // Send message to assistant
+          const assistantResponse = await assistantService.sendMessage(
+            session.threadId,
+            speechResult
+          );
+
+          responseText = assistantResponse.text;
+          tripSearchData = assistantResponse.tripSearch;
+
+        } catch (error) {
+          console.error('Assistant error, falling back to LLM:', error);
+          // Fall back to LLM
+          const llmResponse = await llmService.generateResponse(
+            session.conversationHistory,
+            speechResult,
+            { maxTokens: 300 }
+          );
+          responseText = llmResponse.text;
+          tripSearchData = llmResponse.tripSearch;
+        }
+      } else {
+        // Use LLM directly
+        const llmResponse = await llmService.generateResponse(
+          session.conversationHistory,
+          speechResult,
+          { maxTokens: 300 } // Shorter for voice
+        );
+        responseText = llmResponse.text;
+        tripSearchData = llmResponse.tripSearch;
+      }
 
       // Add assistant response to conversation history
       await sessionManager.addMessage(from, {
