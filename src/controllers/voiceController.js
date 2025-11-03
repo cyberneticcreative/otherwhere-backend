@@ -27,9 +27,7 @@ class VoiceController {
       // Use OpenAI Realtime API for voice streaming
       if (realtimeService.isConfigured()) {
         // Generate TwiML to connect Twilio's audio stream to our WebSocket
-        const protocol = process.env.NODE_ENV === 'production' ? 'wss' : 'ws';
-        const host = process.env.RAILWAY_PUBLIC_DOMAIN || process.env.BACKEND_WEBHOOK_URL?.replace('https://', '').replace('/webhook', '') || 'localhost:3000';
-        const websocketUrl = `${protocol}://${host}/voice/media-stream`;
+        const websocketUrl = 'wss://otherwhere-backend-production.up.railway.app/voice/media-stream';
 
         const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>

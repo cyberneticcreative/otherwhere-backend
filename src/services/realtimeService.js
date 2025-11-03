@@ -1,6 +1,7 @@
 const axios = require('axios');
 const WebSocket = require('ws');
-const n8nService = require('./n8nService');
+const twilioService = require('./twilioService');
+const travelPayoutsService = require('./travelPayoutsService');
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_PROMPT_ID = process.env.OPENAI_PROMPT_ID || 'pmpt_6908682a4f608190bf9ccc7211db3dcb0f52166b142036f3';
@@ -169,12 +170,19 @@ class RealtimeService {
                   } : null
                 };
 
-                // Send to n8n
-                if (n8nService.isConfigured()) {
-                  n8nService.triggerTripSearch(tripDetails, from, callSid)
-                    .then(() => console.log(`✈️ Trip search triggered for ${from}`))
-                    .catch(err => console.error(`❌ n8n error:`, err.message));
-                }
+                // Search flights directly and send SMS
+                console.log(`🛫 Searching flights for ${from}...`);
+                travelPayoutsService.searchFlights(tripDetails)
+                  .then(results => {
+                    const smsMessage = travelPayoutsService.formatSMSMessage(results);
+                    return twilioService.sendLongSMS(from, smsMessage);
+                  })
+                  .then(() => console.log(`✅ Flight results sent via SMS to ${from}`))
+                  .catch(err => {
+                    console.error(`❌ Flight search error:`, err.message);
+                    twilioService.sendSMS(from, "I found your trip details! I'm searching for flights and will text you the results shortly.")
+                      .catch(e => console.error('Failed to send fallback SMS:', e));
+                  });
               } catch (err) {
                 console.error('Failed to parse function arguments:', err);
               }
