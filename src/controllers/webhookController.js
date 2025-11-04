@@ -92,7 +92,7 @@ class WebhookController {
           check_in,
           check_out,
           travelers = 1,
-          budget_cad
+          budget_usd
         } = parameters;
 
         console.log(`🛫 Processing search_trips for ${destination}`);
@@ -104,9 +104,9 @@ class WebhookController {
           startDate: check_in,
           endDate: check_out,
           travelers,
-          budget: budget_cad ? {
-            amount: budget_cad,
-            currency: 'CAD'
+          budget: budget_usd ? {
+            amount: budget_usd,
+            currency: 'USD'
           } : null
         };
 
