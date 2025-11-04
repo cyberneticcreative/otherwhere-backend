@@ -26,30 +26,43 @@ class TravelPayoutsService {
       console.log(`📅 Dates: ${startDate} to ${endDate || 'one-way'}`);
       console.log(`👥 Travelers: ${travelers || 1}`);
 
-      // TravelPayouts API v2 - has more cached data than v3
-      // Using latest prices endpoint which returns actual cached flight data
-      const apiUrl = 'https://api.travelpayouts.com/v2/prices/latest';
+      // TravelPayouts API v2 - using week-matrix for date-specific searches
+      // This endpoint supports depart_date and return_date parameters
+      const apiUrl = 'https://api.travelpayouts.com/v2/prices/week-matrix';
 
       const params = {
         origin: originCity,
         destination: destCity,
         currency: budget?.currency || 'USD',
         token: TRAVELPAYOUTS_TOKEN,
-        limit: 10 // Get more results to filter
+        show_to_affiliates: true
       };
+
+      // Add dates if provided
+      if (startDate) {
+        params.depart_date = startDate;
+      }
+      if (endDate) {
+        params.return_date = endDate;
+      }
 
       const response = await axios.get(apiUrl, {
         params,
         timeout: 10000
       });
 
-      console.log(`✅ Found ${response.data.data?.length || 0} flight options`);
+      console.log('📦 TravelPayouts API Response:', JSON.stringify(response.data, null, 2));
+
+      const flightData = response.data.data || response.data;
+      const flightCount = Array.isArray(flightData) ? flightData.length : 0;
+
+      console.log(`✅ Found ${flightCount} flight options`);
 
       // Format the results and add affiliate markers
-      const flights = this.formatFlightResults(response.data.data || [], tripData);
+      const flights = this.formatFlightResults(flightData, tripData);
 
       return {
-        success: true,
+        success: flights.length > 0,
         flights,
         searchParams: {
           origin: originCity,
@@ -183,7 +196,8 @@ class TravelPayoutsService {
    */
   formatSMSMessage(searchResults) {
     if (!searchResults.success || searchResults.flights.length === 0) {
-      return "Sorry, I couldn't find any flights for your search. Try different dates or destinations!";
+      const { origin, destination, dates } = searchResults.searchParams || {};
+      return `No flights found for ${origin} → ${destination} on ${dates}. Want to try different dates?`;
     }
 
     const { flights, searchParams } = searchResults;
