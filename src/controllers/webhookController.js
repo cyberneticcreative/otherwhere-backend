@@ -82,7 +82,15 @@ class WebhookController {
       console.log('🔧 ElevenLabs tool call webhook received');
       console.log('Payload:', JSON.stringify(req.body, null, 2));
 
-      const { tool_name, parameters, conversation_id, metadata } = req.body;
+      let { tool_name, parameters, conversation_id, metadata } = req.body;
+
+      // ElevenLabs may send parameters directly in the body without tool_name
+      // If we detect trip search parameters directly, infer the tool name
+      if (!tool_name && req.body.destination) {
+        console.log('🔍 Detected search_trips parameters directly in body');
+        tool_name = 'search_trips';
+        parameters = req.body;
+      }
 
       // Handle search_trips function
       if (tool_name === 'search_trips') {
@@ -92,20 +100,23 @@ class WebhookController {
           check_in,
           check_out,
           travelers = 1,
-          budget_usd
+          budget_usd,
+          budget
         } = parameters;
 
         console.log(`🛫 Processing search_trips for ${destination}`);
 
         // Build trip details object
+        // Support both 'budget' and 'budget_usd' field names
+        const budgetAmount = budget_usd || budget;
         const tripDetails = {
           destination,
           origin,
           startDate: check_in,
           endDate: check_out,
           travelers,
-          budget: budget_usd ? {
-            amount: budget_usd,
+          budget: budgetAmount ? {
+            amount: budgetAmount,
             currency: 'USD'
           } : null
         };
