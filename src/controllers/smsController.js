@@ -11,10 +11,12 @@ class SMSController {
    * @param {Object} res - Express response
    */
   async handleInboundSMS(req, res) {
+    const startTime = Date.now();
     try {
       const { From: from, Body: body, MessageSid: messageSid } = req.body;
 
       console.log(`📱 Inbound SMS from ${from}: "${body}"`);
+      console.log(`⏱️  Request start: ${new Date().toISOString()}`);
 
       // Get or create session
       const session = await sessionManager.getSession(from);
@@ -32,6 +34,9 @@ class SMSController {
       let responseText;
       let tripSearchData = null;
       let flightResults = null;
+
+      const aiStartTime = Date.now();
+      console.log(`🤖 Using ${useAssistant ? 'OpenAI Assistant' : 'Direct LLM'}`);
 
       if (useAssistant) {
         // Use OpenAI Assistant
@@ -53,6 +58,9 @@ class SMSController {
           tripSearchData = assistantResponse.tripSearch;
           flightResults = assistantResponse.flightResults;
 
+          const aiDuration = Date.now() - aiStartTime;
+          console.log(`⏱️  Assistant took ${aiDuration}ms (${(aiDuration/1000).toFixed(1)}s)`);
+
         } catch (error) {
           console.error('Assistant error, falling back to LLM:', error);
           // Fall back to LLM
@@ -71,6 +79,9 @@ class SMSController {
         );
         responseText = llmResponse.text;
         tripSearchData = llmResponse.tripSearch;
+
+        const aiDuration = Date.now() - aiStartTime;
+        console.log(`⏱️  LLM took ${aiDuration}ms (${(aiDuration/1000).toFixed(1)}s)`);
       }
 
       // Add assistant response to conversation history
@@ -80,7 +91,10 @@ class SMSController {
       });
 
       // Send response via SMS
+      const smsStartTime = Date.now();
       await twilioService.sendLongSMS(from, responseText);
+      const smsDuration = Date.now() - smsStartTime;
+      console.log(`⏱️  SMS send took ${smsDuration}ms`);
 
       // If we have flight results, send them as a separate SMS
       if (flightResults && flightResults.flights && flightResults.flights.length > 0) {
@@ -111,6 +125,9 @@ class SMSController {
       // Send TwiML response to Twilio
       res.type('text/xml');
       res.send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+
+      const totalDuration = Date.now() - startTime;
+      console.log(`⏱️  TOTAL request time: ${totalDuration}ms (${(totalDuration/1000).toFixed(1)}s)`);
 
     } catch (error) {
       console.error('Error handling inbound SMS:', error);

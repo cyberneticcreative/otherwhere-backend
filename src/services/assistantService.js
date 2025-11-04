@@ -95,14 +95,17 @@ class AssistantService {
    * @param {number} maxAttempts - Maximum polling attempts
    * @returns {Promise<Object>} Completed run object with tripSearchData if applicable
    */
-  async waitForRunCompletion(threadId, runId, maxAttempts = 30) {
+  async waitForRunCompletion(threadId, runId, maxAttempts = 60) {
     let tripSearchData = null;
     let flightResults = null;
+    const pollStartTime = Date.now();
 
     for (let i = 0; i < maxAttempts; i++) {
       const run = await openai.beta.threads.runs.retrieve(threadId, runId);
 
       if (run.status === 'completed') {
+        const pollDuration = Date.now() - pollStartTime;
+        console.log(`⏱️  Assistant polling completed in ${pollDuration}ms after ${i + 1} attempts`);
         return { run, tripSearchData, flightResults };
       }
 
@@ -136,6 +139,7 @@ class AssistantService {
 
               // ACTUALLY SEARCH FOR FLIGHTS using Google Flights API
               try {
+                const flightSearchStart = Date.now();
                 console.log('🛫 Calling Google Flights API...');
 
                 // Step 1: Resolve airport codes
@@ -197,7 +201,8 @@ class AssistantService {
                   })
                 });
 
-                console.log(`✅ Flight search completed: ${formattedFlights.length} results`);
+                const flightSearchDuration = Date.now() - flightSearchStart;
+                console.log(`✅ Flight search completed: ${formattedFlights.length} results in ${flightSearchDuration}ms`);
 
               } catch (error) {
                 console.error('❌ Google Flights API error:', error.message);
@@ -228,8 +233,9 @@ class AssistantService {
         throw new Error(`Run ${run.status}: ${run.last_error?.message || 'Unknown error'}`);
       }
 
-      // Wait before polling again (exponential backoff)
-      const waitTime = Math.min(1000 * Math.pow(1.5, i), 5000);
+      // Wait before polling again (faster polling, max 2s instead of 5s)
+      // Start at 500ms, increase to 1s, then 2s max
+      const waitTime = i < 3 ? 500 : (i < 10 ? 1000 : 2000);
       await new Promise(resolve => setTimeout(resolve, waitTime));
     }
 
