@@ -73,7 +73,7 @@ class GoogleFlightsService {
    * @param {Object} params - Search parameters
    * @param {string} params.departureId - Departure airport code (e.g., "LAX")
    * @param {string} params.arrivalId - Arrival airport code (e.g., "JFK")
-   * @param {string} params.outboundDate - Departure date (YYYY-MM-DD)
+   * @param {string} [params.outboundDate] - Departure date (YYYY-MM-DD), optional
    * @param {string} [params.returnDate] - Return date for round trips (YYYY-MM-DD)
    * @param {string} [params.travelClass] - ECONOMY, PREMIUM_ECONOMY, BUSINESS, FIRST
    * @param {number} [params.adults] - Number of adult passengers
@@ -110,12 +110,8 @@ class GoogleFlightsService {
       throw new Error('Departure and arrival airport codes are required');
     }
 
-    if (!outboundDate) {
-      throw new Error('Outbound date is required');
-    }
-
-    // Validate date format
-    if (!dayjs(outboundDate, 'YYYY-MM-DD', true).isValid()) {
+    // Validate date format if provided
+    if (outboundDate && !dayjs(outboundDate, 'YYYY-MM-DD', true).isValid()) {
       throw new Error('Invalid outbound date format. Use YYYY-MM-DD');
     }
 
@@ -124,12 +120,11 @@ class GoogleFlightsService {
     }
 
     try {
-      console.log(`[GoogleFlights] Searching flights: ${departureId} → ${arrivalId} on ${outboundDate}`);
+      console.log(`[GoogleFlights] Searching flights: ${departureId} → ${arrivalId}${outboundDate ? ` on ${outboundDate}` : ''}`);
 
       const searchParams = {
         departure_id: departureId,
         arrival_id: arrivalId,
-        outbound_date: outboundDate,
         travel_class: travelClass.toUpperCase(),
         adults,
         currency,
@@ -140,6 +135,9 @@ class GoogleFlightsService {
       };
 
       // Add optional parameters
+      if (outboundDate) {
+        searchParams.outbound_date = outboundDate;
+      }
       if (returnDate) {
         searchParams.return_date = returnDate;
       }
@@ -158,13 +156,18 @@ class GoogleFlightsService {
 
       const data = response.data?.data || response.data;
 
-      console.log(`[GoogleFlights] Found flights:`, data?.itineraries?.length || 0);
+      // Count total flights from both topFlights and otherFlights
+      const topFlightsCount = data?.itineraries?.topFlights?.length || 0;
+      const otherFlightsCount = data?.itineraries?.otherFlights?.length || 0;
+      const totalCount = topFlightsCount + otherFlightsCount;
+
+      console.log(`[GoogleFlights] Found ${totalCount} flights (${topFlightsCount} top, ${otherFlightsCount} other)`);
 
       return {
         success: true,
         searchParams: params,
         results: data,
-        count: data?.itineraries?.length || 0
+        count: totalCount
       };
 
     } catch (error) {
@@ -339,39 +342,43 @@ class GoogleFlightsService {
       return [];
     }
 
-    const itineraries = searchResults.results.itineraries.slice(0, limit);
+    // Combine topFlights and otherFlights, prioritizing topFlights
+    const topFlights = searchResults.results.itineraries.topFlights || [];
+    const otherFlights = searchResults.results.itineraries.otherFlights || [];
+    const allFlights = [...topFlights, ...otherFlights];
 
-    return itineraries.map((itinerary, index) => {
-      const legs = itinerary.legs || [];
-      const outbound = legs[0] || {};
-      const pricing = itinerary.pricing_options?.[0] || {};
+    // Get only the requested number of flights
+    const flightsToFormat = allFlights.slice(0, limit);
 
-      // Calculate duration
-      const durationMinutes = outbound.duration_minutes || 0;
-      const hours = Math.floor(durationMinutes / 60);
-      const minutes = durationMinutes % 60;
-      const duration = `${hours}h ${minutes}m`;
+    return flightsToFormat.map((flight, index) => {
+      // Get first flight segment to extract airline info
+      const firstSegment = flight.flights?.[0] || {};
+      const airline = firstSegment.airline || 'Unknown Airline';
 
-      // Get airline info
-      const carriers = outbound.carriers || [];
-      const airline = carriers.map(c => c.name).join(', ') || 'Unknown Airline';
+      // Parse duration
+      const durationText = flight.duration?.text || '';
 
-      // Get stops
-      const stops = (outbound.segments?.length || 1) - 1;
+      // Get number of stops
+      const stops = flight.stops || 0;
       const stopsText = stops === 0 ? 'Direct' : `${stops} stop${stops > 1 ? 's' : ''}`;
 
       return {
         index: index + 1,
         airline,
-        price: pricing.price?.amount || 0,
-        currency: pricing.price?.currency || 'USD',
-        departure: outbound.departure_time,
-        arrival: outbound.arrival_time,
-        duration,
+        price: flight.price || 0,
+        currency: 'USD', // API returns price in USD
+        departure: flight.departure_time || '',
+        arrival: flight.arrival_time || '',
+        duration: durationText,
+        durationMinutes: flight.duration?.raw || 0,
         stops,
         stopsText,
-        bookingToken: pricing.token || itinerary.token,
-        rawData: itinerary
+        bookingToken: flight.next_token || '',
+        airlineLogo: flight.airline_logo || '',
+        carbonEmissions: flight.carbon_emissions,
+        layovers: flight.layovers || null,
+        bags: flight.bags || { carry_on: 0, checked: 0 },
+        rawData: flight
       };
     });
   }
@@ -392,8 +399,18 @@ class GoogleFlightsService {
     const header = `✈️ Flights ${departureId} → ${arrivalId} (${outboundDate})\n\n`;
 
     const flightsList = formattedFlights.map(flight => {
-      const departTime = dayjs(flight.departure).format('h:mm A');
-      const arriveTime = dayjs(flight.arrival).format('h:mm A');
+      // Parse time from format "26-11-2025 08:53 PM" to just "8:53 AM"
+      const parseTime = (timeStr) => {
+        if (!timeStr) return '';
+        const parts = timeStr.split(' ');
+        if (parts.length >= 3) {
+          return `${parts[1]} ${parts[2]}`; // Returns "08:53 PM"
+        }
+        return timeStr;
+      };
+
+      const departTime = parseTime(flight.departure);
+      const arriveTime = parseTime(flight.arrival);
 
       return `${flight.index}. ${flight.airline}
 $${flight.price} • ${departTime} - ${arriveTime}

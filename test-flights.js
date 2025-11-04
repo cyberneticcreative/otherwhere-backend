@@ -40,15 +40,12 @@ async function testFlightSearch() {
   console.log('========================================\n');
 
   try {
-    // Get tomorrow's date
-    const tomorrow = dayjs().add(1, 'day').format('YYYY-MM-DD');
-
-    console.log(`🔍 Searching flights LAX → JFK on ${tomorrow}...\n`);
+    // Test WITHOUT date first (matching the working curl command)
+    console.log(`🔍 Searching flights LAX → JFK (no date specified)...\n`);
 
     const searchParams = {
       departureId: 'LAX',
       arrivalId: 'JFK',
-      outboundDate: tomorrow,
       adults: 1,
       travelClass: 'ECONOMY',
       currency: 'USD'
@@ -129,7 +126,11 @@ async function testConfigurationCheck() {
   if (isConfigured) {
     console.log('✅ Google Flights API is configured');
     console.log(`   RAPIDAPI_KEY: ${process.env.RAPIDAPI_KEY.substring(0, 10)}...`);
-    console.log(`   RAPIDAPI_HOST: ${process.env.RAPIDAPI_HOST || 'google-flights2.p.rapidapi.com'}\n`);
+    console.log(`   RAPIDAPI_HOST: ${process.env.RAPIDAPI_HOST || 'google-flights2.p.rapidapi.com'}`);
+    console.log('\n   NOTE: If you see 403 errors, check:');
+    console.log('   - RapidAPI subscription status');
+    console.log('   - API key validity');
+    console.log('   - Rate limits\n');
   } else {
     console.log('❌ Google Flights API is NOT configured');
     console.log('   Please set RAPIDAPI_KEY in your .env file\n');
