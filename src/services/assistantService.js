@@ -28,6 +28,7 @@ class AssistantService {
    * @param {string} threadId - Thread ID for the conversation
    * @param {string} userMessage - User's message
    * @param {Object} options - Additional options
+   * @param {string} options.userPhone - User's phone number for async notifications
    * @returns {Promise<Object>} Response object with text and metadata
    */
   async sendMessage(threadId, userMessage, options = {}) {
@@ -52,7 +53,7 @@ class AssistantService {
       console.log(`🏃 Started run ${run.id}`);
 
       // Poll for completion and handle function calls
-      const { run: completedRun, tripSearchData, flightResults } = await this.waitForRunCompletion(threadId, run.id);
+      const { run: completedRun, tripSearchData, flightResults } = await this.waitForRunCompletion(threadId, run.id, options);
 
       // Get the assistant's response
       const messages = await openai.beta.threads.messages.list(threadId, {
@@ -92,10 +93,12 @@ class AssistantService {
    * Poll for run completion and handle function calls
    * @param {string} threadId - Thread ID
    * @param {string} runId - Run ID
+   * @param {Object} options - Options including userPhone for async notifications
    * @param {number} maxAttempts - Maximum polling attempts
    * @returns {Promise<Object>} Completed run object with tripSearchData if applicable
    */
-  async waitForRunCompletion(threadId, runId, maxAttempts = 30) {
+  async waitForRunCompletion(threadId, runId, options = {}, maxAttempts = 30) {
+    const twilioService = require('./twilioService');
     let tripSearchData = null;
     let flightResults = null;
 
@@ -121,54 +124,95 @@ class AssistantService {
               const args = JSON.parse(toolCall.function.arguments);
               console.log(`🔍 search_trips called with:`, args);
 
-              // Store trip search data
-              tripSearchData = {
+              // 🔐 VALIDATE: Check for required fields
+              const requiredFields = {
                 destination: args.destination,
-                origin: args.origin || 'LAX',
-                startDate: args.check_in || null,
-                endDate: args.check_out || null,
-                travelers: args.travelers || 1,
-                budget: args.budget_cad ? {
-                  amount: args.budget_cad,
-                  currency: 'CAD'
-                } : null
+                origin: args.origin,
+                check_in: args.check_in,
+                check_out: args.check_out,
+                travelers: args.travelers
               };
 
-              // ACTUALLY SEARCH FOR FLIGHTS using TravelPayouts
-              try {
-                console.log('🛫 Calling TravelPayouts API...');
-                const searchResults = await travelPayoutsService.searchFlights(tripSearchData);
-                flightResults = searchResults;
+              const missingFields = Object.entries(requiredFields)
+                .filter(([key, value]) => !value)
+                .map(([key]) => key);
 
-                // Return flight results to the assistant
-                const resultsMessage = searchResults.flights.length > 0
-                  ? `Found ${searchResults.flights.length} flights! Best price: ${searchResults.flights[0].price}`
-                  : 'No flights found for these dates. Try different dates.';
+              if (missingFields.length > 0) {
+                console.log(`⚠️ Missing required fields: ${missingFields.join(', ')}`);
 
-                toolOutputs.push({
-                  tool_call_id: toolCall.id,
-                  output: JSON.stringify({
-                    success: true,
-                    message: resultsMessage,
-                    flightCount: searchResults.flights.length,
-                    bestPrice: searchResults.flights[0]?.price || null
-                  })
-                });
-
-                console.log(`✅ Flight search completed: ${searchResults.flights.length} results`);
-
-              } catch (error) {
-                console.error('❌ TravelPayouts error:', error.message);
-
-                // Return error to assistant
+                // Return validation error to assistant
                 toolOutputs.push({
                   tool_call_id: toolCall.id,
                   output: JSON.stringify({
                     success: false,
-                    message: 'Unable to search flights at the moment. Please try again.'
+                    message: `I need more information to search for flights. Please ask the user for: ${missingFields.join(', ').replace(/_/g, ' ')}`,
+                    missingFields: missingFields
                   })
                 });
+
+                continue; // Skip to next tool call
               }
+
+              // Store trip search data (all fields are validated at this point)
+              tripSearchData = {
+                destination: args.destination,
+                origin: args.origin,
+                startDate: args.check_in,
+                endDate: args.check_out,
+                travelers: args.travelers,
+                budget: args.budget_usd ? {
+                  amount: args.budget_usd,
+                  currency: 'USD'
+                } : null
+              };
+
+              // 🚀 ASYNC FLIGHT SEARCH - Don't block the response!
+              console.log('🛫 Triggering async flight search...');
+
+              // Fire-and-forget: Start search in background
+              travelPayoutsService.searchFlights(tripSearchData)
+                .then(async (searchResults) => {
+                  console.log(`✅ Background search completed: ${searchResults.flights.length} flights found`);
+
+                  // Send results as separate SMS if phone number available
+                  if (options.userPhone) {
+                    try {
+                      const smsMessage = travelPayoutsService.formatSMSMessage(searchResults);
+                      await twilioService.sendLongSMS(options.userPhone, smsMessage);
+                      console.log('✅ Flight results SMS sent');
+                    } catch (smsError) {
+                      console.error('❌ Failed to send flight results SMS:', smsError);
+                    }
+                  }
+                })
+                .catch(err => {
+                  console.error('❌ Background flight search failed:', err.message);
+
+                  // Optionally notify user of error
+                  if (options.userPhone) {
+                    twilioService.sendSMS(
+                      options.userPhone,
+                      "Sorry, I encountered an issue searching for flights. Please try again with different dates or destinations."
+                    ).catch(console.error);
+                  }
+                });
+
+              // Return immediately to assistant (don't wait for search)
+              const destination = args.destination;
+              const dates = args.check_in && args.check_out
+                ? `from ${args.check_in} to ${args.check_out}`
+                : 'for your dates';
+
+              toolOutputs.push({
+                tool_call_id: toolCall.id,
+                output: JSON.stringify({
+                  success: true,
+                  message: `Perfect! I'm searching for flights to ${destination} ${dates}. I'll text you the best options in just a moment!`,
+                  searching: true
+                })
+              });
+
+              console.log(`⚡ Search started in background, responding immediately`);
             }
           }
 

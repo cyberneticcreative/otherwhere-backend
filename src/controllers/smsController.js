@@ -43,10 +43,11 @@ class SMSController {
             session.threadId = threadId;
           }
 
-          // Send message to assistant
+          // Send message to assistant with user's phone number for async notifications
           const assistantResponse = await assistantService.sendMessage(
             session.threadId,
-            body
+            body,
+            { userPhone: from }
           );
 
           responseText = assistantResponse.text;
@@ -82,21 +83,9 @@ class SMSController {
       // Send response via SMS
       await twilioService.sendLongSMS(from, responseText);
 
-      // If we have flight results, send them as a separate SMS
-      if (flightResults && flightResults.flights && flightResults.flights.length > 0) {
-        console.log('✈️ Sending flight results as separate SMS...');
-        const flightMessage = travelPayoutsService.formatSMSMessage(flightResults);
-
-        // Send flight details as a second SMS (after a brief delay for better UX)
-        setTimeout(async () => {
-          try {
-            await twilioService.sendLongSMS(from, flightMessage);
-            console.log('✅ Flight results SMS sent');
-          } catch (smsError) {
-            console.error('❌ Failed to send flight results SMS:', smsError);
-          }
-        }, 2000); // 2 second delay
-      }
+      // Note: Flight results are now sent asynchronously from assistantService
+      // to avoid blocking the conversation response. They will arrive as a
+      // separate SMS once the background search completes.
 
       // Send TwiML response to Twilio
       res.type('text/xml');
