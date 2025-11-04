@@ -73,6 +73,115 @@ class WebhookController {
   }
 
   /**
+   * Handle ElevenLabs function/tool call webhooks
+   * @param {Object} req - Express request
+   * @param {Object} res - Express response
+   */
+  async handleElevenLabsToolCall(req, res) {
+    try {
+      console.log('🔧 ElevenLabs tool call webhook received');
+      console.log('Payload:', JSON.stringify(req.body, null, 2));
+
+      const { tool_name, parameters, conversation_id, metadata } = req.body;
+
+      // Handle search_trips function
+      if (tool_name === 'search_trips') {
+        const {
+          destination,
+          origin = 'LAX',
+          check_in,
+          check_out,
+          travelers = 1,
+          budget_cad
+        } = parameters;
+
+        console.log(`🛫 Processing search_trips for ${destination}`);
+
+        // Build trip details object
+        const tripDetails = {
+          destination,
+          origin,
+          startDate: check_in,
+          endDate: check_out,
+          travelers,
+          budget: budget_cad ? {
+            amount: budget_cad,
+            currency: 'CAD'
+          } : null
+        };
+
+        // Get user phone number from metadata
+        const phoneNumber = metadata?.phone_number || metadata?.from;
+
+        try {
+          // Trigger trip search via n8n if configured
+          if (n8nService.isConfigured() && phoneNumber) {
+            await n8nService.triggerTripSearch(tripDetails, phoneNumber, conversation_id);
+
+            // Update session
+            if (phoneNumber) {
+              await sessionManager.updateSession(phoneNumber, {
+                tripDetails,
+                context: {
+                  conversationId: conversation_id,
+                  tripSearchInitiated: true,
+                  tripSearchTimestamp: new Date().toISOString()
+                }
+              });
+            }
+
+            // Return success response to ElevenLabs
+            res.json({
+              result: `Perfect! I'm searching for trips to ${destination} from ${origin}, departing ${check_in} and returning ${check_out} for ${travelers} traveler(s). I'll text you the best options I find!`,
+              success: true
+            });
+
+          } else {
+            // Fallback: search flights directly
+            const travelPayoutsService = require('../services/travelPayoutsService');
+            const results = await travelPayoutsService.searchFlights(tripDetails);
+            const smsMessage = travelPayoutsService.formatSMSMessage(results);
+
+            // Send SMS if phone number available
+            if (phoneNumber) {
+              await twilioService.sendLongSMS(phoneNumber, smsMessage);
+            }
+
+            res.json({
+              result: `I found some great options! ${phoneNumber ? "I've texted you the details." : "Here are your flight options: " + smsMessage}`,
+              success: true
+            });
+          }
+
+        } catch (searchError) {
+          console.error('Trip search error:', searchError);
+          res.json({
+            result: `I've noted your trip preferences for ${destination}. Let me work on finding you the best options and I'll get back to you shortly!`,
+            success: true,
+            error: searchError.message
+          });
+        }
+
+      } else {
+        // Unknown tool
+        console.log(`Unknown tool call: ${tool_name}`);
+        res.status(400).json({
+          result: `Unknown tool: ${tool_name}`,
+          success: false
+        });
+      }
+
+    } catch (error) {
+      console.error('Error handling ElevenLabs tool call:', error);
+      res.status(500).json({
+        result: 'Sorry, I encountered an error processing your request.',
+        success: false,
+        error: error.message
+      });
+    }
+  }
+
+  /**
    * Handle trip search completion webhook from n8n
    * @param {Object} req - Express request
    * @param {Object} res - Express response

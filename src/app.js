@@ -49,8 +49,9 @@ app.post('/voice/inbound', voiceController.handleInboundCall);
 app.post('/voice/process-speech', voiceController.processSpeech);
 app.post('/voice/status', voiceController.handleStatusCallback);
 
-// ElevenLabs webhook (from agents)
+// ElevenLabs webhooks
 app.post('/webhook/elevenlabs', webhookController.handleElevenLabsWebhook);
+app.post('/webhook/elevenlabs/tool-call', webhookController.handleElevenLabsToolCall);
 
 // n8n webhook (for trip processing)
 app.post('/webhook/trip-complete', webhookController.handleTripComplete);

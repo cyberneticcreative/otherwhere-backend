@@ -2,12 +2,13 @@ const twilioService = require('../services/twilioService');
 const llmService = require('../services/llmService');
 const assistantService = require('../services/assistantService');
 const realtimeService = require('../services/realtimeService');
+const elevenLabsService = require('../services/elevenLabsService');
 const n8nService = require('../services/n8nService');
 const sessionManager = require('../services/sessionManager');
 
 class VoiceController {
   /**
-   * Handle inbound voice calls with OpenAI Realtime API
+   * Handle inbound voice calls - routes to ElevenLabs or OpenAI based on configuration
    * @param {Object} req - Express request
    * @param {Object} res - Express response
    */
@@ -24,10 +25,35 @@ class VoiceController {
         context: { ...session.context, currentCallSid: callSid }
       });
 
-      // Use OpenAI Realtime API for voice streaming
-      if (realtimeService.isConfigured()) {
+      // Priority 1: Use ElevenLabs if configured (better quality)
+      if (elevenLabsService.isConfigured() && process.env.ELEVENLABS_VOICE_AGENT_ID) {
+        console.log('🎙️ Using ElevenLabs for voice call');
+
+        // Transfer call to ElevenLabs agent
+        const agentId = process.env.ELEVENLABS_VOICE_AGENT_ID;
+
+        // Generate TwiML to handoff to ElevenLabs
+        const twiml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Say>Connecting you to your AI travel assistant.</Say>
+  <Connect>
+    <ConversationalAI agentId="${agentId}">
+      <Parameter name="from" value="${from}" />
+      <Parameter name="callSid" value="${callSid}" />
+    </ConversationalAI>
+  </Connect>
+</Response>`;
+
+        res.type('text/xml');
+        res.send(twiml);
+
+      // Priority 2: Use OpenAI Realtime API for voice streaming
+      } else if (realtimeService.isConfigured()) {
+        console.log('🎙️ Using OpenAI Realtime API for voice call');
+
         // Generate TwiML to connect Twilio's audio stream to our WebSocket
-        const websocketUrl = 'wss://otherwhere-backend-production.up.railway.app/voice/media-stream';
+        const websocketUrl = process.env.VOICE_WEBSOCKET_URL ||
+          'wss://otherwhere-backend-production.up.railway.app/voice/media-stream';
 
         const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
@@ -43,8 +69,11 @@ class VoiceController {
 
         res.type('text/xml');
         res.send(twiml);
+
       } else {
         // Fallback to standard voice handling
+        console.log('🎙️ Using fallback voice handling');
+
         const greeting = "Hello! Welcome to Otherwhere, your AI travel concierge. " +
           "I can help you plan amazing trips. Tell me, where would you like to go?";
 
