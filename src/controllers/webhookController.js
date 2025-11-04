@@ -121,16 +121,25 @@ class WebhookController {
           } : null
         };
 
-        // Get user phone number from metadata
-        const phoneNumber = metadata?.phone_number || metadata?.from;
+        // Get user phone number from metadata or try to find active call
+        let phoneNumber = metadata?.phone_number || metadata?.from;
+
+        // If no phone number in metadata, try to find from active voice session
+        if (!phoneNumber) {
+          console.log('⚠️ No phone number in webhook metadata, checking active sessions...');
+          phoneNumber = await this.findActiveVoiceSession();
+        }
 
         try {
-          // Trigger trip search via n8n if configured
-          if (n8nService.isConfigured() && phoneNumber) {
-            await n8nService.triggerTripSearch(tripDetails, phoneNumber, conversation_id);
+          // If we have a phone number, we can send results via SMS
+          if (phoneNumber) {
+            console.log(`📱 Phone number found: ${phoneNumber}`);
 
-            // Update session
-            if (phoneNumber) {
+            // Trigger trip search via n8n if configured
+            if (n8nService.isConfigured()) {
+              await n8nService.triggerTripSearch(tripDetails, phoneNumber, conversation_id);
+
+              // Update session
               await sessionManager.updateSession(phoneNumber, {
                 tripDetails,
                 context: {
@@ -139,29 +148,46 @@ class WebhookController {
                   tripSearchTimestamp: new Date().toISOString()
                 }
               });
-            }
 
-            // Return success response to ElevenLabs
-            res.json({
-              result: `Perfect! I'm searching for trips to ${destination} from ${origin}, departing ${check_in} and returning ${check_out} for ${travelers} traveler(s). I'll text you the best options I find!`,
-              success: true
-            });
+              // Return success response to ElevenLabs
+              res.json({
+                result: `Perfect! I'm searching for trips to ${destination} from ${origin}, departing ${check_in} and returning ${check_out} for ${travelers} traveler(s). I'll text you the best options I find!`,
+                success: true
+              });
+
+            } else {
+              // Fallback: search flights directly using TravelPayouts
+              const travelPayoutsService = require('../services/travelPayoutsService');
+              const results = await travelPayoutsService.searchFlights(tripDetails);
+              const smsMessage = travelPayoutsService.formatSMSMessage(results);
+
+              // Send SMS with results
+              await twilioService.sendLongSMS(phoneNumber, smsMessage);
+
+              res.json({
+                result: `I found some great options! I've texted you the details.`,
+                success: true
+              });
+            }
 
           } else {
-            // Fallback: search flights directly
+            // No phone number available - search anyway and return verbal results
+            console.log('⚠️ No phone number available, searching flights without SMS...');
             const travelPayoutsService = require('../services/travelPayoutsService');
             const results = await travelPayoutsService.searchFlights(tripDetails);
-            const smsMessage = travelPayoutsService.formatSMSMessage(results);
 
-            // Send SMS if phone number available
-            if (phoneNumber) {
-              await twilioService.sendLongSMS(phoneNumber, smsMessage);
+            if (results.success && results.flights.length > 0) {
+              const topFlight = results.flights[0];
+              res.json({
+                result: `I found flights from ${origin} to ${destination}! The best option is ${topFlight.price} with ${topFlight.transfers} stop${topFlight.transfers !== 1 ? 's' : ''}. I'm unable to text you the details right now, but you can book at ${topFlight.link || 'Aviasales.com'}`,
+                success: true
+              });
+            } else {
+              res.json({
+                result: `I searched but couldn't find any flights for those exact dates. Would you like to try different dates or a different route?`,
+                success: true
+              });
             }
-
-            res.json({
-              result: `I found some great options! ${phoneNumber ? "I've texted you the details." : "Here are your flight options: " + smsMessage}`,
-              success: true
-            });
           }
 
         } catch (searchError) {
@@ -302,6 +328,35 @@ class WebhookController {
     } catch (error) {
       console.error('Error handling generic webhook:', error);
       res.status(500).json({ success: false, error: error.message });
+    }
+  }
+
+  /**
+   * Find an active voice session to get phone number
+   * This is a fallback when ElevenLabs doesn't send phone in metadata
+   * @returns {Promise<string|null>} Phone number or null
+   */
+  async findActiveVoiceSession() {
+    try {
+      const sessions = await sessionManager.getAllSessions();
+
+      // Find the most recent active voice session (within last 5 minutes)
+      const fiveMinutesAgo = Date.now() - (5 * 60 * 1000);
+
+      for (const [phoneNumber, session] of Object.entries(sessions)) {
+        if (session.channel === 'voice' &&
+            session.context?.currentCallSid &&
+            new Date(session.lastActivity).getTime() > fiveMinutesAgo) {
+          console.log(`📞 Found active voice session for ${phoneNumber}`);
+          return phoneNumber;
+        }
+      }
+
+      console.log('❌ No active voice sessions found');
+      return null;
+    } catch (error) {
+      console.error('Error finding active voice session:', error);
+      return null;
     }
   }
 }
