@@ -55,22 +55,24 @@ class SMSController {
 
         } catch (error) {
           console.error('Assistant error, falling back to LLM:', error);
-          // Fall back to LLM
+          // Fall back to LLM (now with function calling support!)
           const llmResponse = await llmService.generateResponse(
             session.conversationHistory,
             body
           );
           responseText = llmResponse.text;
           tripSearchData = llmResponse.tripSearch;
+          flightResults = llmResponse.flightResults; // Get flight results from LLM too
         }
       } else {
-        // Use LLM directly
+        // Use LLM directly (with function calling support)
         const llmResponse = await llmService.generateResponse(
           session.conversationHistory,
           body
         );
         responseText = llmResponse.text;
         tripSearchData = llmResponse.tripSearch;
+        flightResults = llmResponse.flightResults;
       }
 
       // Add assistant response to conversation history

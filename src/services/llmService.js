@@ -7,54 +7,27 @@ const openai = new OpenAI({
 const MODEL = process.env.OPENAI_MODEL || 'gpt-4-turbo-preview';
 
 // System prompt for the travel concierge
-const SYSTEM_PROMPT = `You are Otherwhere, an AI travel concierge assistant. Your role is to help travelers plan amazing trips by:
+const SYSTEM_PROMPT = `You are Otherwhere, a travel concierge. Help plan trips via SMS.
 
-1. Understanding their travel preferences, budget, and interests
-2. Asking clarifying questions to gather necessary information:
-   - Destination (where they want to go)
-   - Travel dates or duration
-   - Budget range
-   - Number of travelers
-   - Interests and preferences (adventure, relaxation, culture, food, etc.)
-   - Special requirements (accessibility, dietary restrictions, etc.)
+Keep responses VERY SHORT (under 100 chars when possible).
 
-3. Once you have enough information, you can initiate a trip search. When ready, respond with a structured JSON object wrapped in <TRIP_SEARCH> tags:
+Gather: destination, dates, budget, # of travelers.
 
-<TRIP_SEARCH>
-{
-  "destination": "Paris, France",
-  "startDate": "2024-05-01",
-  "endDate": "2024-05-07",
-  "travelers": 2,
-  "budget": {
-    "min": 2000,
-    "max": 4000,
-    "currency": "USD"
-  },
-  "interests": ["culture", "food", "museums"],
-  "preferences": {
-    "accommodation": "mid-range hotel",
-    "transportation": "public transit",
-    "activities": "mix of guided and independent"
-  }
-}
-</TRIP_SEARCH>
+Once you have destination and at least rough dates, call search_trips to find flights.
 
-4. Be conversational, friendly, and enthusiastic about travel. Ask one or two questions at a time to avoid overwhelming the user.
-
-5. If the user's message is unclear, ask for clarification rather than making assumptions.
-
-6. Keep responses concise, especially for SMS (under 320 characters when possible).`;
+Be friendly but concise. One question at a time.`;
 
 class OpenAIService {
   /**
-   * Generate a response using OpenAI
+   * Generate a response using OpenAI with function calling
    * @param {Array} conversationHistory - Array of messages
    * @param {string} userMessage - Current user message
    * @param {Object} options - Additional options
    * @returns {Promise<Object>} Response object with text and metadata
    */
   async generateResponse(conversationHistory = [], userMessage, options = {}) {
+    const travelPayoutsService = require('./travelPayoutsService');
+
     try {
       const messages = [
         { role: 'system', content: SYSTEM_PROMPT },
@@ -65,34 +38,124 @@ class OpenAIService {
         { role: 'user', content: userMessage }
       ];
 
+      // Define the search_trips function tool
+      const tools = [{
+        type: 'function',
+        function: {
+          name: 'search_trips',
+          description: 'Search for flights to a destination. Call this when you have destination and approximate dates.',
+          parameters: {
+            type: 'object',
+            properties: {
+              destination: {
+                type: 'string',
+                description: 'Destination city or airport code (e.g., Paris, Tokyo, NYC)'
+              },
+              origin: {
+                type: 'string',
+                description: 'Origin city or airport code',
+                default: 'LAX'
+              },
+              check_in: {
+                type: 'string',
+                description: 'Departure date in YYYY-MM-DD format'
+              },
+              check_out: {
+                type: 'string',
+                description: 'Return date in YYYY-MM-DD format (optional for one-way)'
+              },
+              travelers: {
+                type: 'number',
+                description: 'Number of travelers',
+                default: 1
+              },
+              budget_cad: {
+                type: 'number',
+                description: 'Budget in USD (optional)'
+              }
+            },
+            required: ['destination']
+          }
+        }
+      }];
+
       const completion = await openai.chat.completions.create({
         model: MODEL,
         messages,
-        max_completion_tokens: options.maxTokens || 500,
+        tools,
+        tool_choice: 'auto',
+        max_completion_tokens: options.maxTokens || 300,
         presence_penalty: 0.6,
         frequency_penalty: 0.3
       });
 
-      const responseText = completion.choices[0].message.content;
+      const choice = completion.choices[0];
+      let flightResults = null;
+      let responseText = '';
 
-      // Check if response contains a trip search request
-      const tripSearchMatch = responseText.match(/<TRIP_SEARCH>([\s\S]*?)<\/TRIP_SEARCH>/);
-      let tripSearchData = null;
+      // Handle function calls
+      if (choice.message.tool_calls && choice.message.tool_calls.length > 0) {
+        for (const toolCall of choice.message.tool_calls) {
+          if (toolCall.function.name === 'search_trips') {
+            const args = JSON.parse(toolCall.function.arguments);
+            console.log(`🔍 LLM search_trips called with:`, args);
 
-      if (tripSearchMatch) {
-        try {
-          tripSearchData = JSON.parse(tripSearchMatch[1].trim());
-        } catch (e) {
-          console.error('Failed to parse trip search data:', e);
+            // Build trip data
+            const tripData = {
+              destination: args.destination,
+              origin: args.origin || 'LAX',
+              startDate: args.check_in || null,
+              endDate: args.check_out || null,
+              travelers: args.travelers || 1,
+              budget: args.budget_cad ? {
+                amount: args.budget_cad,
+                currency: 'USD'
+              } : null
+            };
+
+            // Actually search for flights
+            try {
+              console.log('🛫 Calling TravelPayouts API...');
+              const searchResults = await travelPayoutsService.searchFlights(tripData);
+              flightResults = searchResults;
+
+              // Add function result to messages and get final response
+              messages.push(choice.message);
+              messages.push({
+                role: 'tool',
+                tool_call_id: toolCall.id,
+                content: JSON.stringify({
+                  success: true,
+                  message: `Found ${searchResults.flights.length} flights! Best price: ${searchResults.flights[0]?.price || 'N/A'}`,
+                  flightCount: searchResults.flights.length
+                })
+              });
+
+              // Get the assistant's final response
+              const finalCompletion = await openai.chat.completions.create({
+                model: MODEL,
+                messages,
+                max_completion_tokens: 150 // Keep it very short
+              });
+
+              responseText = finalCompletion.choices[0].message.content;
+              console.log(`✅ LLM flight search completed: ${searchResults.flights.length} results`);
+
+            } catch (error) {
+              console.error('❌ TravelPayouts error in LLM fallback:', error.message);
+              responseText = "I found some issues searching flights right now. Can you try again or adjust your dates?";
+            }
+          }
         }
+      } else {
+        // No function call, just return the text response
+        responseText = choice.message.content || '';
       }
 
-      // Remove the trip search JSON from the response text
-      const cleanedResponse = responseText.replace(/<TRIP_SEARCH>[\s\S]*?<\/TRIP_SEARCH>/, '').trim();
-
       return {
-        text: cleanedResponse || 'Let me search for that trip for you...',
-        tripSearch: tripSearchData,
+        text: responseText || 'Let me help you find flights...',
+        tripSearch: null, // No longer needed with function calling
+        flightResults, // Include actual flight results
         usage: completion.usage,
         model: completion.model
       };

@@ -183,32 +183,35 @@ class TravelPayoutsService {
    */
   formatSMSMessage(searchResults) {
     if (!searchResults.success || searchResults.flights.length === 0) {
-      return "Sorry, I couldn't find any flights for your search. Try different dates or destinations!";
+      return "No flights found. Try different dates!";
     }
 
     const { flights, searchParams } = searchResults;
     const topFlight = flights[0];
 
-    let message = `✈️ Found ${flights.length} flights!\n\n`;
-    message += `🏆 Best Deal: ${topFlight.price}\n`;
-    message += `${searchParams.origin} → ${searchParams.destination}\n`;
-    message += `${searchParams.dates}\n\n`;
+    // Super concise format to avoid SMS splitting
+    let message = `✈️ ${searchParams.origin}→${searchParams.destination}\n`;
+    message += `Best: ${topFlight.price}`;
 
-    // List top 3 flights with booking links
+    if (topFlight.transfers > 0) {
+      message += ` (${topFlight.transfers} stop)`;
+    }
+
+    message += `\n\n`;
+
+    // List top 3 flights compactly
     flights.slice(0, 3).forEach(flight => {
       message += `${flight.rank}. ${flight.price}`;
       if (flight.transfers > 0) {
-        message += ` (${flight.transfers} stop${flight.transfers > 1 ? 's' : ''})`;
+        message += ` (${flight.transfers}st)`;
       }
       message += `\n`;
     });
 
     // Add booking link for best deal
     if (topFlight.link) {
-      message += `\n🔗 Book now: ${topFlight.link}`;
+      message += `\nBook: ${topFlight.link}`;
     }
-
-    message += `\n\n💡 Click the link to book your flight!`;
 
     return message;
   }
