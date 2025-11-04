@@ -6,11 +6,23 @@ const twilioPhoneNumber = process.env.TWILIO_PHONE_NUMBER;
 
 let client = null;
 
-if (accountSid && authToken) {
-  client = twilio(accountSid, authToken);
-  console.log('✅ Twilio client initialized');
+// Validate credentials before initializing
+if (accountSid && authToken &&
+    accountSid !== 'your_account_sid' &&
+    authToken !== 'your_auth_token' &&
+    accountSid.startsWith('AC')) {
+  try {
+    client = twilio(accountSid, authToken);
+    console.log('✅ Twilio client initialized');
+  } catch (error) {
+    console.error('❌ Failed to initialize Twilio client:', error.message);
+    console.warn('⚠️ SMS functionality will be unavailable');
+  }
 } else {
-  console.warn('⚠️ Twilio credentials not configured');
+  console.warn('⚠️ Twilio credentials not configured or invalid');
+  console.warn('   TWILIO_ACCOUNT_SID must start with "AC"');
+  console.warn('   TWILIO_AUTH_TOKEN must be set');
+  console.warn('   SMS functionality will be unavailable');
 }
 
 class TwilioService {
