@@ -1,7 +1,7 @@
 const axios = require('axios');
 const WebSocket = require('ws');
 const twilioService = require('./twilioService');
-const travelPayoutsService = require('./travelPayoutsService');
+const googleFlightsService = require('./googleFlightsService');
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_PROMPT_ID = process.env.OPENAI_PROMPT_ID || 'pmpt_6908682a4f608190bf9ccc7211db3dcb0f52166b142036f3';
@@ -231,19 +231,71 @@ class RealtimeService {
                 } : null
               };
 
-              // Search flights directly and send SMS
+              // Search flights directly and send SMS using Google Flights API
               console.log(`🛫 Searching flights for ${from}...`);
-              travelPayoutsService.searchFlights(tripDetails)
-                .then(results => {
-                  const smsMessage = travelPayoutsService.formatSMSMessage(results);
-                  return twilioService.sendLongSMS(from, smsMessage);
-                })
-                .then(() => console.log(`✅ Flight results sent via SMS to ${from}`))
-                .catch(err => {
+
+              // Async function to handle the flight search
+              (async () => {
+                try {
+                  // Step 1: Resolve airport codes
+                  const [originAirports, destAirports] = await Promise.all([
+                    googleFlightsService.searchAirport(tripDetails.origin),
+                    googleFlightsService.searchAirport(tripDetails.destination)
+                  ]);
+
+                  if (!originAirports || originAirports.length === 0) {
+                    throw new Error(`Could not find airport for: ${tripDetails.origin}`);
+                  }
+
+                  if (!destAirports || destAirports.length === 0) {
+                    throw new Error(`Could not find airport for: ${tripDetails.destination}`);
+                  }
+
+                  const originCode = originAirports[0].code;
+                  const destCode = destAirports[0].code;
+
+                  console.log(`[GoogleFlights] Resolved: ${originCode} → ${destCode}`);
+
+                  // Step 2: Search flights
+                  const searchParams = {
+                    departureId: originCode,
+                    arrivalId: destCode,
+                    outboundDate: tripDetails.startDate,
+                    returnDate: tripDetails.endDate || undefined,
+                    adults: parseInt(tripDetails.travelers) || 1,
+                    travelClass: 'ECONOMY',
+                    currency: 'USD'
+                  };
+
+                  const searchResults = await googleFlightsService.searchFlights(searchParams);
+
+                  // Step 3: Format results
+                  const formattedFlights = googleFlightsService.formatFlightResults(searchResults, 3);
+
+                  if (formattedFlights.length === 0) {
+                    throw new Error('No flights found for your search');
+                  }
+
+                  // Step 4: Generate SMS message
+                  const smsMessage = googleFlightsService.formatSMSMessage(formattedFlights, {
+                    departureId: originCode,
+                    arrivalId: destCode,
+                    outboundDate: tripDetails.startDate
+                  });
+
+                  // Step 5: Send SMS
+                  await twilioService.sendLongSMS(from, smsMessage);
+                  console.log(`✅ Flight results sent via SMS to ${from}`);
+
+                } catch (err) {
                   console.error(`❌ Flight search error:`, err.message);
-                  twilioService.sendSMS(from, "I found your trip details! I'm searching for flights and will text you the results shortly.")
-                    .catch(e => console.error('Failed to send fallback SMS:', e));
-                });
+                  try {
+                    await twilioService.sendSMS(from, "I found your trip details! I'm searching for flights and will text you the results shortly.");
+                  } catch (e) {
+                    console.error('Failed to send fallback SMS:', e);
+                  }
+                }
+              })();
             } catch (err) {
               console.error('Failed to parse function arguments:', err);
             }

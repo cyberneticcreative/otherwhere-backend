@@ -1,5 +1,5 @@
 const OpenAI = require('openai');
-const travelPayoutsService = require('./travelPayoutsService');
+const googleFlightsService = require('./googleFlightsService');
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
@@ -134,15 +134,56 @@ class AssistantService {
                 } : null
               };
 
-              // ACTUALLY SEARCH FOR FLIGHTS using TravelPayouts
+              // ACTUALLY SEARCH FOR FLIGHTS using Google Flights API
               try {
-                console.log('🛫 Calling TravelPayouts API...');
-                const searchResults = await travelPayoutsService.searchFlights(tripSearchData);
-                flightResults = searchResults;
+                console.log('🛫 Calling Google Flights API...');
+
+                // Step 1: Resolve airport codes
+                const [originAirports, destAirports] = await Promise.all([
+                  googleFlightsService.searchAirport(tripSearchData.origin),
+                  googleFlightsService.searchAirport(tripSearchData.destination)
+                ]);
+
+                if (!originAirports || originAirports.length === 0) {
+                  throw new Error(`Could not find airport for: ${tripSearchData.origin}`);
+                }
+
+                if (!destAirports || destAirports.length === 0) {
+                  throw new Error(`Could not find airport for: ${tripSearchData.destination}`);
+                }
+
+                const originCode = originAirports[0].code;
+                const destCode = destAirports[0].code;
+
+                console.log(`[GoogleFlights] Resolved: ${originCode} → ${destCode}`);
+
+                // Step 2: Search flights
+                const searchParams = {
+                  departureId: originCode,
+                  arrivalId: destCode,
+                  outboundDate: tripSearchData.startDate,
+                  returnDate: tripSearchData.endDate || undefined,
+                  adults: parseInt(tripSearchData.travelers) || 1,
+                  travelClass: 'ECONOMY',
+                  currency: 'USD'
+                };
+
+                const searchResults = await googleFlightsService.searchFlights(searchParams);
+
+                // Step 3: Format results
+                const formattedFlights = googleFlightsService.formatFlightResults(searchResults, 3);
+
+                // Store formatted results for SMS sending later
+                flightResults = {
+                  flights: formattedFlights,
+                  originCode,
+                  destCode,
+                  searchParams
+                };
 
                 // Return flight results to the assistant
-                const resultsMessage = searchResults.flights.length > 0
-                  ? `Found ${searchResults.flights.length} flights! Best price: ${searchResults.flights[0].price}`
+                const resultsMessage = formattedFlights.length > 0
+                  ? `Found ${formattedFlights.length} flights! Best price: $${formattedFlights[0].price} on ${formattedFlights[0].airline}`
                   : 'No flights found for these dates. Try different dates.';
 
                 toolOutputs.push({
@@ -150,22 +191,23 @@ class AssistantService {
                   output: JSON.stringify({
                     success: true,
                     message: resultsMessage,
-                    flightCount: searchResults.flights.length,
-                    bestPrice: searchResults.flights[0]?.price || null
+                    flightCount: formattedFlights.length,
+                    bestPrice: formattedFlights[0]?.price || null,
+                    bestAirline: formattedFlights[0]?.airline || null
                   })
                 });
 
-                console.log(`✅ Flight search completed: ${searchResults.flights.length} results`);
+                console.log(`✅ Flight search completed: ${formattedFlights.length} results`);
 
               } catch (error) {
-                console.error('❌ TravelPayouts error:', error.message);
+                console.error('❌ Google Flights API error:', error.message);
 
                 // Return error to assistant
                 toolOutputs.push({
                   tool_call_id: toolCall.id,
                   output: JSON.stringify({
                     success: false,
-                    message: 'Unable to search flights at the moment. Please try again.'
+                    message: 'Unable to search flights at the moment. Please try again or check city names.'
                   })
                 });
               }

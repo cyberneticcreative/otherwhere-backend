@@ -85,7 +85,17 @@ class SMSController {
       // If we have flight results, send them as a separate SMS
       if (flightResults && flightResults.flights && flightResults.flights.length > 0) {
         console.log('✈️ Sending flight results as separate SMS...');
-        const flightMessage = travelPayoutsService.formatSMSMessage(flightResults);
+
+        // Use Google Flights service for formatting
+        const googleFlightsService = require('../services/googleFlightsService');
+        const flightMessage = googleFlightsService.formatSMSMessage(
+          flightResults.flights,
+          {
+            departureId: flightResults.originCode,
+            arrivalId: flightResults.destCode,
+            outboundDate: flightResults.searchParams?.outboundDate
+          }
+        );
 
         // Send flight details as a second SMS (after a brief delay for better UX)
         setTimeout(async () => {

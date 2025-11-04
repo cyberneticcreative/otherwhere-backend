@@ -2,6 +2,7 @@ const twilioService = require('../services/twilioService');
 const n8nService = require('../services/n8nService');
 const sessionManager = require('../services/sessionManager');
 const elevenLabsService = require('../services/elevenLabsService');
+const googleFlightsService = require('../services/googleFlightsService');
 
 class WebhookController {
   /**
@@ -114,50 +115,107 @@ class WebhookController {
         const phoneNumber = metadata?.phone_number || metadata?.from;
 
         try {
-          // Trigger trip search via n8n if configured
-          if (n8nService.isConfigured() && phoneNumber) {
-            await n8nService.triggerTripSearch(tripDetails, phoneNumber, conversation_id);
+          // Search flights using Google Flights API
+          console.log(`[GoogleFlights] Searching: ${origin} → ${destination} on ${check_in}`);
 
-            // Update session
-            if (phoneNumber) {
-              await sessionManager.updateSession(phoneNumber, {
-                tripDetails,
-                context: {
-                  conversationId: conversation_id,
-                  tripSearchInitiated: true,
-                  tripSearchTimestamp: new Date().toISOString()
-                }
-              });
-            }
+          // Step 1: Resolve airport codes
+          const [originAirports, destAirports] = await Promise.all([
+            googleFlightsService.searchAirport(origin),
+            googleFlightsService.searchAirport(destination)
+          ]);
 
-            // Return success response to ElevenLabs
-            res.json({
-              result: `Perfect! I'm searching for trips to ${destination} from ${origin}, departing ${check_in} and returning ${check_out} for ${travelers} traveler(s). I'll text you the best options I find!`,
-              success: true
-            });
-
-          } else {
-            // Fallback: search flights directly
-            const travelPayoutsService = require('../services/travelPayoutsService');
-            const results = await travelPayoutsService.searchFlights(tripDetails);
-            const smsMessage = travelPayoutsService.formatSMSMessage(results);
-
-            // Send SMS if phone number available
-            if (phoneNumber) {
-              await twilioService.sendLongSMS(phoneNumber, smsMessage);
-            }
-
-            res.json({
-              result: `I found some great options! ${phoneNumber ? "I've texted you the details." : "Here are your flight options: " + smsMessage}`,
-              success: true
-            });
+          if (!originAirports || originAirports.length === 0) {
+            throw new Error(`Could not find airport for: ${origin}`);
           }
 
-        } catch (searchError) {
-          console.error('Trip search error:', searchError);
+          if (!destAirports || destAirports.length === 0) {
+            throw new Error(`Could not find airport for: ${destination}`);
+          }
+
+          const originCode = originAirports[0].code;
+          const destCode = destAirports[0].code;
+
+          console.log(`[GoogleFlights] Resolved: ${originCode} → ${destCode}`);
+
+          // Step 2: Search flights
+          const searchParams = {
+            departureId: originCode,
+            arrivalId: destCode,
+            outboundDate: check_in,
+            returnDate: check_out || undefined, // Only add if provided
+            adults: parseInt(travelers) || 1,
+            travelClass: 'ECONOMY',
+            currency: 'USD'
+          };
+
+          const searchResults = await googleFlightsService.searchFlights(searchParams);
+
+          // Step 3: Format top 3 results for SMS
+          const formattedFlights = googleFlightsService.formatFlightResults(searchResults, 3);
+
+          if (formattedFlights.length === 0) {
+            throw new Error('No flights found for your search');
+          }
+
+          // Step 4: Generate SMS message
+          const smsMessage = googleFlightsService.formatSMSMessage(formattedFlights, {
+            departureId: originCode,
+            arrivalId: destCode,
+            outboundDate: check_in
+          });
+
+          // Step 5: Save to session if phone number available
+          if (phoneNumber) {
+            await sessionManager.updateSession(phoneNumber, {
+              tripDetails,
+              context: {
+                conversationId: conversation_id,
+                lastFlightSearch: {
+                  origin,
+                  destination,
+                  originCode,
+                  destCode,
+                  date: check_in,
+                  returnDate: check_out,
+                  travelers,
+                  results: formattedFlights
+                },
+                tripSearchInitiated: true,
+                tripSearchTimestamp: new Date().toISOString()
+              }
+            });
+
+            // Step 6: Send SMS with flight results
+            await twilioService.sendLongSMS(phoneNumber, smsMessage);
+            console.log(`✅ Sent flight results via SMS to ${phoneNumber}`);
+          }
+
+          // Step 7: Return success response to ElevenLabs
           res.json({
-            result: `I've noted your trip preferences for ${destination}. Let me work on finding you the best options and I'll get back to you shortly!`,
-            success: true,
+            result: phoneNumber
+              ? `Great! I found ${formattedFlights.length} flights from ${origin} to ${destination}. I've texted you the details with prices and times. Reply with a number to get the booking link!`
+              : `I found ${formattedFlights.length} flights from ${origin} to ${destination}. The best option is $${formattedFlights[0].price} on ${formattedFlights[0].airline}.`,
+            success: true
+          });
+
+        } catch (searchError) {
+          console.error('Flight search error:', searchError);
+
+          // Send error message via SMS if phone available
+          if (phoneNumber) {
+            try {
+              await twilioService.sendSMS(
+                phoneNumber,
+                `Sorry, I had trouble finding flights from ${origin} to ${destination}. Please try different cities or dates.`
+              );
+            } catch (smsError) {
+              console.error('Failed to send error SMS:', smsError);
+            }
+          }
+
+          res.json({
+            result: `I'm having trouble finding flights from ${origin} to ${destination} right now. Could you try different cities or check the spelling?`,
+            success: false,
             error: searchError.message
           });
         }
