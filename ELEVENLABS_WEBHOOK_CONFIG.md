@@ -1,40 +1,41 @@
 # ElevenLabs Webhook Configuration
 
-## Important Configuration for Tool Call Webhooks
+## Webhook URL
 
-When configuring your ElevenLabs voice agent, you need to ensure the phone number is passed through to the tool call webhook.
+Set this in your ElevenLabs agent configuration:
 
-### Webhook URL Configuration
+**Tool Call Webhook URL**: `https://otherwhere-backend-production.up.railway.app/webhook/elevenlabs/tool-call`
 
-In your ElevenLabs agent settings:
+## How Phone Numbers Work
 
-1. **Tool Call Webhook URL**: `https://your-domain.com/webhook/elevenlabs/tool-call`
+The agent should **ask the user for their phone number** during the conversation, then pass it as a parameter to the `search_trips` function.
 
-2. **Pass Phone Number as Query Parameter** (Recommended):
-   ```
-   https://your-domain.com/webhook/elevenlabs/tool-call?from={{phone_number}}
-   ```
+### Example Agent Flow
 
-### Alternative: Configure Agent to Include Metadata
+1. Agent: "I'd be happy to search for flights to Tokyo! What phone number should I text the results to?"
+2. User: "647-293-7581" or "six four seven two nine three seven five eight one"
+3. Agent: Calls `search_trips` with `phone_number` parameter
+4. Backend receives the phone number, searches flights, and sends SMS
 
-If ElevenLabs supports passing custom metadata in tool calls, configure the agent to include:
+### Phone Number Priority (Backend Logic)
 
-```json
-{
-  "metadata": {
-    "phone_number": "{{caller_phone}}",
-    "from": "{{caller_phone}}"
-  }
-}
-```
+The backend will look for the phone number in this order:
 
-### Fallback Behavior
+1. **`phone_number` parameter** (from agent asking user) ⭐ **RECOMMENDED**
+2. `metadata.phone_number` or `metadata.from` (if passed by webhook)
+3. Active voice session lookup (fallback within last 5 minutes)
+4. If none found: Returns verbal results only (no SMS)
 
-The backend now includes a fallback mechanism that:
+### Phone Number Formats Supported
 
-1. Checks webhook metadata for phone number
-2. If not found, searches for active voice sessions (last 5 minutes)
-3. If still not found, returns verbal flight results without SMS
+The backend automatically normalizes phone numbers to E.164 format:
+
+- `6472937581` → `+16472937581`
+- `647-293-7581` → `+16472937581`
+- `1-647-293-7581` → `+16472937581`
+- `+16472937581` → `+16472937581` (already correct)
+
+So the agent can accept phone numbers in any common format!
 
 ### Testing
 
@@ -51,13 +52,37 @@ If you see: `⚠️ No phone number in webhook metadata`, the phone number is no
 Your ElevenLabs agent should have:
 
 - **Agent ID**: Set in `ELEVENLABS_VOICE_AGENT_ID` env var
-- **Tool/Function**: `search_trips` configured with parameters:
-  - `destination` (string)
-  - `origin` (string, default: "LAX")
-  - `check_in` (string, date format: YYYY-MM-DD)
-  - `check_out` (string, date format: YYYY-MM-DD)
-  - `travelers` (number, default: 1)
-  - `budget` or `budget_usd` (number, optional)
+- **Tool/Function Name**: `search_trips`
+- **Tool Parameters**:
+  - `destination` (string, required) - e.g., "Tokyo", "Paris", "London"
+  - `origin` (string, optional, default: "LAX") - e.g., "Toronto", "Vancouver", "New York"
+  - `check_in` (string, required) - Departure date in YYYY-MM-DD format, e.g., "2025-12-02"
+  - `check_out` (string, required) - Return date in YYYY-MM-DD format, e.g., "2026-01-02"
+  - `travelers` (string or number, optional, default: "1")
+  - `budget` or `budget_usd` (string or number, optional) - Budget amount in USD
+  - **`phone_number` (string, recommended)** - User's phone number for SMS results
 
-- **Tool Webhook**: Point to your backend's tool-call endpoint
-- **Post-call Webhook**: `https://your-domain.com/webhook/elevenlabs`
+- **Tool Webhook**: `https://otherwhere-backend-production.up.railway.app/webhook/elevenlabs/tool-call`
+- **Post-call Webhook**: `https://otherwhere-backend-production.up.railway.app/webhook/elevenlabs`
+
+### Agent Prompt Suggestion
+
+Configure your agent to collect all information before calling the function:
+
+```
+When a user wants to search for flights:
+1. Ask for destination
+2. Ask for origin (if not mentioned, assume they mean from their location)
+3. Ask for travel dates (departure and return)
+4. Ask for number of travelers
+5. Ask "What phone number should I text the flight options to?"
+6. Once you have all information, call the search_trips function
+```
+
+### Important: Date Format
+
+Make sure the agent converts user-friendly dates to YYYY-MM-DD format:
+- User says: "December 2nd" → Agent passes: "2025-12-02"
+- User says: "January 2nd" → Agent passes: "2026-01-02"
+
+Check the current year and use appropriate logic for date conversion.

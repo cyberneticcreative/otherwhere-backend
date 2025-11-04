@@ -101,7 +101,8 @@ class WebhookController {
           check_out,
           travelers = 1,
           budget_usd,
-          budget
+          budget,
+          phone_number // Agent should ask user for phone number
         } = parameters;
 
         console.log(`🛫 Processing search_trips for ${destination}`);
@@ -121,13 +122,19 @@ class WebhookController {
           } : null
         };
 
-        // Get user phone number from metadata or try to find active call
-        let phoneNumber = metadata?.phone_number || metadata?.from;
+        // Get phone number: prioritize parameter, then metadata, then active session
+        let phoneNumber = phone_number || metadata?.phone_number || metadata?.from;
 
-        // If no phone number in metadata, try to find from active voice session
+        // If no phone number in parameters or metadata, try to find from active voice session
         if (!phoneNumber) {
-          console.log('⚠️ No phone number in webhook metadata, checking active sessions...');
+          console.log('⚠️ No phone number in parameters or metadata, checking active sessions...');
           phoneNumber = await this.findActiveVoiceSession();
+        }
+
+        // Normalize phone number format (remove spaces, dashes, ensure + prefix)
+        if (phoneNumber) {
+          phoneNumber = this.normalizePhoneNumber(phoneNumber);
+          console.log(`📱 Using phone number: ${phoneNumber}`);
         }
 
         try {
@@ -358,6 +365,32 @@ class WebhookController {
       console.error('Error finding active voice session:', error);
       return null;
     }
+  }
+
+  /**
+   * Normalize phone number to E.164 format
+   * @param {string} phoneNumber - Raw phone number
+   * @returns {string} Normalized phone number
+   */
+  normalizePhoneNumber(phoneNumber) {
+    if (!phoneNumber) return null;
+
+    // Remove all non-digit characters except +
+    let normalized = phoneNumber.replace(/[^\d+]/g, '');
+
+    // If it doesn't start with +, add it (assume US/Canada +1 if 10 digits)
+    if (!normalized.startsWith('+')) {
+      if (normalized.length === 10) {
+        normalized = '+1' + normalized;
+      } else if (normalized.length === 11 && normalized.startsWith('1')) {
+        normalized = '+' + normalized;
+      } else {
+        // Default to adding + if not already there
+        normalized = '+' + normalized;
+      }
+    }
+
+    return normalized;
   }
 }
 
