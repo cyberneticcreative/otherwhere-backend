@@ -1,6 +1,8 @@
 # Otherwhere Backend
 
-AI Travel Concierge Backend - A unified brain for SMS and Voice travel planning powered by OpenAI, Twilio, ElevenLabs, and n8n.
+AI Travel Concierge Backend - SMS and Voice travel planning powered by OpenAI, Twilio, ElevenLabs, and TravelPayouts.
+
+**📖 See [ARCHITECTURE.md](./ARCHITECTURE.md) for detailed architecture documentation.**
 
 ## Overview
 
@@ -9,34 +11,36 @@ Otherwhere is an intelligent travel concierge that helps users plan amazing trip
 ## Features
 
 - **Multi-Channel Support**: Interact via SMS or voice calls
-- **AI-Powered Conversations**: Uses OpenAI GPT-4 for natural language understanding
+- **AI-Powered Conversations**: Uses OpenAI GPT-4 with function calling for natural language understanding
 - **Voice AI Integration**: ElevenLabs conversational AI for voice interactions
 - **Session Management**: Maintains conversation context across interactions
-- **Trip Search Automation**: Integrates with n8n workflows for trip research
-- **Twilio Integration**: SMS and voice webhooks
-- **Error Handling**: Comprehensive error handling and logging
+- **Flight Search**: Direct integration with TravelPayouts API (Aviasales)
+- **Comprehensive City Support**: 150+ major cities worldwide
+- **Twilio Integration**: SMS and voice webhooks with error handling
+- **Webhook Security**: Signature validation for ElevenLabs webhooks
 - **Redis Support**: Optional Redis for production session storage
 
 ## Architecture
 
 ```
 ├── src/
-│   ├── app.js                 # Express app entry point
+│   ├── app.js                      # Express app entry point
 │   ├── controllers/
-│   │   ├── smsController.js   # SMS webhook handlers
-│   │   ├── voiceController.js # Voice webhook handlers
-│   │   └── webhookController.js # ElevenLabs & n8n webhooks
+│   │   ├── smsController.js        # SMS webhook handlers
+│   │   ├── voiceController.js      # Voice webhook handlers
+│   │   └── webhookController.js    # ElevenLabs webhooks
 │   ├── services/
-│   │   ├── sessionManager.js   # Session/conversation management
-│   │   ├── openaiService.js    # OpenAI integration
-│   │   ├── twilioService.js    # Twilio SMS/Voice
-│   │   ├── elevenLabsService.js # ElevenLabs AI agents
-│   │   └── n8nService.js       # n8n workflow triggers
+│   │   ├── sessionManager.js       # Session/conversation management
+│   │   ├── llmService.js           # Direct OpenAI LLM integration
+│   │   ├── assistantService.js     # OpenAI Assistants API
+│   │   ├── realtimeService.js      # OpenAI Realtime API (voice)
+│   │   ├── twilioService.js        # Twilio SMS/Voice
+│   │   ├── elevenLabsService.js    # ElevenLabs AI agents
+│   │   └── travelPayoutsService.js # Flight search API
 │   ├── middleware/
-│   │   └── errorHandler.js    # Global error handling
+│   │   └── errorHandler.js         # Global error handling
 │   └── utils/
-│       ├── constants.js       # App constants
-│       └── helpers.js         # Utility functions
+│       └── constants.js            # App constants
 ```
 
 ## Prerequisites
@@ -45,9 +49,9 @@ Otherwhere is an intelligent travel concierge that helps users plan amazing trip
 - npm or yarn
 - Twilio account with SMS and Voice capabilities
 - OpenAI API key
-- ElevenLabs account (optional, for voice AI)
-- n8n instance for workflow automation (optional)
-- Redis (optional, for production)
+- TravelPayouts API token and Aviasales affiliate marker
+- ElevenLabs account (optional, for enhanced voice AI)
+- Redis (optional, for production session storage)
 
 ## Installation
 
@@ -86,14 +90,15 @@ TWILIO_PHONE_NUMBER=+19789179795
 ELEVENLABS_API_KEY=your_elevenlabs_key
 ELEVENLABS_TEXT_AGENT_ID=your_text_agent_id
 ELEVENLABS_VOICE_AGENT_ID=your_voice_agent_id
+ELEVENLABS_WEBHOOK_SECRET=your_webhook_secret
+
+# Travel API Configuration
+TRAVELPAYOUTS_TOKEN=your_token
+AVIASALES_MARKER=your_affiliate_id
 
 # Redis Configuration (Optional)
 REDIS_URL=redis://localhost:6379
 USE_REDIS=false
-
-# n8n Webhook URL (Optional)
-N8N_WEBHOOK_URL=https://your-n8n-instance.com/webhook/otherwhere-trip-search
-BACKEND_WEBHOOK_URL=http://localhost:3000/webhook
 ```
 
 ## Running the Application
@@ -126,8 +131,8 @@ npm test
 - `POST /voice/status` - Receives call status callbacks
 
 ### Integration Webhooks
-- `POST /webhook/elevenlabs` - Receives webhooks from ElevenLabs agents
-- `POST /webhook/trip-complete` - Receives trip search results from n8n
+- `POST /webhook/elevenlabs` - Receives conversation webhooks from ElevenLabs agents
+- `POST /webhook/elevenlabs/tool-call` - Receives function call webhooks from ElevenLabs
 
 ### Development Endpoints
 - `GET /sessions` - Lists all active sessions (dev only)
@@ -139,26 +144,34 @@ npm test
 1. User sends SMS to Twilio number
 2. Twilio forwards message to `/sms/inbound` webhook
 3. System retrieves or creates user session
-4. Message is sent to OpenAI or ElevenLabs for processing
-5. If trip details are extracted, n8n workflow is triggered
-6. Response is sent back to user via SMS
+4. Message is sent to OpenAI Assistants API for processing
+5. If trip details are extracted, flight search is triggered via TravelPayouts API
+6. Flight results are formatted and sent back to user via SMS
 
-### Voice Flow
+### Voice Flow (ElevenLabs)
 1. User calls Twilio number
 2. Twilio hits `/voice/inbound` webhook
-3. System generates TwiML response with greeting
-4. User speaks, Twilio transcribes and sends to `/voice/process-speech`
-5. OpenAI processes the speech and generates response
-6. Response is converted to TwiML for voice playback
-7. Conversation continues until trip search is initiated or call ends
+3. System generates TwiML to hand off call to ElevenLabs agent
+4. User converses naturally with ElevenLabs AI
+5. When trip details are collected, `search_trips` function is called
+6. Backend webhook receives function call and searches flights
+7. Results are sent to user via SMS
+
+### Voice Flow (Fallback - OpenAI Realtime)
+1. User calls Twilio number
+2. Twilio connects audio stream to WebSocket `/voice/media-stream`
+3. Audio is streamed bidirectionally to OpenAI Realtime API
+4. OpenAI processes speech in real-time and responds
+5. When trip details are extracted, flights are searched
+6. Results are sent via SMS
 
 ### Trip Search Flow
-1. AI identifies complete trip requirements from conversation
-2. System extracts structured trip data
-3. n8n workflow is triggered with trip parameters
-4. n8n searches for flights, hotels, and activities
-5. Results are sent back to `/webhook/trip-complete`
-6. System formats and sends results to user
+1. AI (OpenAI or ElevenLabs) identifies complete trip requirements
+2. System extracts structured trip data (destination, dates, travelers, budget)
+3. TravelPayouts API is called with search parameters
+4. Flight results are sorted by price and formatted
+5. Top 5 results with Aviasales booking links are sent to user
+6. User can click the link to book directly
 
 ## Session Management
 
@@ -177,8 +190,10 @@ See `.env.example` for all available configuration options. Key variables:
 
 - `OPENAI_API_KEY` - Required for AI responses
 - `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` - Required for Twilio integration
-- `ELEVENLABS_API_KEY` - Optional, for voice AI enhancement
-- `N8N_WEBHOOK_URL` - Optional, for trip search automation
+- `TRAVELPAYOUTS_TOKEN` - Required for flight search
+- `AVIASALES_MARKER` - Required for affiliate tracking
+- `ELEVENLABS_API_KEY` - Optional, for enhanced voice AI
+- `ELEVENLABS_WEBHOOK_SECRET` - Optional, for webhook signature validation
 - `USE_REDIS` - Set to `true` to use Redis for session storage
 
 ## Deployment
@@ -232,17 +247,21 @@ docker run -p 3000:3000 --env-file .env otherwhere-backend
 ## ElevenLabs Setup (Optional)
 
 1. Create conversational AI agents in ElevenLabs dashboard
-2. Configure text agent for SMS interactions
-3. Configure voice agent for phone call interactions
-4. Set webhook URL to `https://your-domain.com/webhook/elevenlabs`
-5. Add agent IDs to `.env`
+2. Configure voice agent for phone call interactions
+3. Add `search_trips` function/tool to the agent:
+   - Parameters: `destination`, `origin`, `check_in`, `check_out`, `travelers`, `budget_usd`
+4. Set tool call webhook URL to `https://your-domain.com/webhook/elevenlabs/tool-call`
+5. Set conversation webhook URL to `https://your-domain.com/webhook/elevenlabs`
+6. Generate webhook secret and add to `.env` as `ELEVENLABS_WEBHOOK_SECRET`
+7. Add agent IDs to `.env`
 
-## n8n Setup (Optional)
+## TravelPayouts Setup
 
-1. Create n8n workflow with webhook trigger
-2. Add logic to search for flights, hotels, activities
-3. Send results back to `https://your-domain.com/webhook/trip-complete`
-4. Add webhook URL to `.env`
+1. Sign up for TravelPayouts account at https://www.travelpayouts.com
+2. Apply for Aviasales affiliate program
+3. Get your API token from the dashboard
+4. Get your Aviasales marker (affiliate ID)
+5. Add both to `.env` as `TRAVELPAYOUTS_TOKEN` and `AVIASALES_MARKER`
 
 ## Troubleshooting
 

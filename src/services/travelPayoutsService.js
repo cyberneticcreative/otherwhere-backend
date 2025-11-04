@@ -76,26 +76,151 @@ class TravelPayoutsService {
    * @returns {string} IATA code
    */
   extractCityCode(cityName) {
-    // Common city mappings
+    // Comprehensive city to IATA code mappings
     const cityMap = {
-      'los angeles': 'LAX',
-      'la': 'LAX',
-      'new york': 'NYC',
-      'nyc': 'NYC',
-      'new york city': 'NYC',
-      'paris': 'PAR',
-      'london': 'LON',
-      'tokyo': 'TYO',
-      'san francisco': 'SFO',
+      // North America
+      'los angeles': 'LAX', 'la': 'LAX',
+      'new york': 'NYC', 'nyc': 'NYC', 'new york city': 'NYC',
+      'san francisco': 'SFO', 'sf': 'SFO',
       'chicago': 'CHI',
       'miami': 'MIA',
       'boston': 'BOS',
       'seattle': 'SEA',
-      'las vegas': 'LAS',
+      'las vegas': 'LAS', 'vegas': 'LAS',
       'orlando': 'ORL',
+      'washington': 'WAS', 'dc': 'WAS', 'washington dc': 'WAS',
+      'atlanta': 'ATL',
+      'denver': 'DEN',
+      'phoenix': 'PHX',
+      'dallas': 'DFW',
+      'houston': 'HOU',
+      'philadelphia': 'PHL',
+      'detroit': 'DTT',
+      'minneapolis': 'MSP',
+      'portland': 'PDX',
+      'san diego': 'SAN',
+      'austin': 'AUS',
+      'nashville': 'BNA',
+      'new orleans': 'MSY',
+      'salt lake city': 'SLC',
+      'honolulu': 'HNL',
+
+      // Canada
       'toronto': 'YTO',
       'vancouver': 'YVR',
-      'montreal': 'YMQ'
+      'montreal': 'YMQ',
+      'calgary': 'YYC',
+      'ottawa': 'YOW',
+      'edmonton': 'YEA',
+
+      // Mexico & Central America
+      'mexico city': 'MEX',
+      'cancun': 'CUN',
+      'guadalajara': 'GDL',
+      'cabo': 'SJD', 'cabo san lucas': 'SJD',
+      'puerto vallarta': 'PVR',
+      'san jose': 'SJO', // Costa Rica
+      'panama city': 'PTY',
+
+      // Europe
+      'london': 'LON',
+      'paris': 'PAR',
+      'rome': 'ROM',
+      'barcelona': 'BCN',
+      'madrid': 'MAD',
+      'amsterdam': 'AMS',
+      'berlin': 'BER',
+      'munich': 'MUC',
+      'frankfurt': 'FRA',
+      'vienna': 'VIE',
+      'prague': 'PRG',
+      'budapest': 'BUD',
+      'dublin': 'DUB',
+      'edinburgh': 'EDI',
+      'manchester': 'MAN',
+      'lisbon': 'LIS',
+      'athens': 'ATH',
+      'istanbul': 'IST',
+      'moscow': 'MOW',
+      'st petersburg': 'LED',
+      'copenhagen': 'CPH',
+      'stockholm': 'STO',
+      'oslo': 'OSL',
+      'helsinki': 'HEL',
+      'zurich': 'ZRH',
+      'geneva': 'GVA',
+      'brussels': 'BRU',
+      'warsaw': 'WAW',
+      'milan': 'MIL',
+      'venice': 'VCE',
+      'florence': 'FLR',
+      'nice': 'NCE',
+      'lyon': 'LYS',
+
+      // Asia
+      'tokyo': 'TYO',
+      'osaka': 'OSA',
+      'kyoto': 'UKY',
+      'seoul': 'SEL',
+      'beijing': 'BJS',
+      'shanghai': 'SHA',
+      'hong kong': 'HKG',
+      'singapore': 'SIN',
+      'bangkok': 'BKK',
+      'kuala lumpur': 'KUL',
+      'delhi': 'DEL',
+      'mumbai': 'BOM',
+      'bangalore': 'BLR',
+      'dubai': 'DXB',
+      'abu dhabi': 'AUH',
+      'doha': 'DOH',
+      'tel aviv': 'TLV',
+      'taipei': 'TPE',
+      'manila': 'MNL',
+      'jakarta': 'JKT',
+      'hanoi': 'HAN',
+      'ho chi minh': 'SGN', 'saigon': 'SGN',
+      'phnom penh': 'PNH',
+      'kathmandu': 'KTM',
+      'colombo': 'CMB',
+
+      // Oceania
+      'sydney': 'SYD',
+      'melbourne': 'MEL',
+      'brisbane': 'BNE',
+      'auckland': 'AKL',
+      'wellington': 'WLG',
+      'perth': 'PER',
+      'adelaide': 'ADL',
+
+      // South America
+      'buenos aires': 'BUE',
+      'sao paulo': 'SAO',
+      'rio de janeiro': 'RIO', 'rio': 'RIO',
+      'lima': 'LIM',
+      'bogota': 'BOG',
+      'santiago': 'SCL',
+      'quito': 'UIO',
+      'medellin': 'MDE',
+      'cartagena': 'CTG',
+
+      // Africa
+      'cairo': 'CAI',
+      'johannesburg': 'JNB',
+      'cape town': 'CPT',
+      'nairobi': 'NBO',
+      'casablanca': 'CAS',
+      'marrakech': 'RAK',
+      'lagos': 'LOS',
+      'addis ababa': 'ADD',
+
+      // Middle East
+      'riyadh': 'RUH',
+      'jeddah': 'JED',
+      'kuwait city': 'KWI',
+      'beirut': 'BEY',
+      'amman': 'AMM',
+      'muscat': 'MCT'
     };
 
     const normalized = cityName.toLowerCase().trim();
@@ -106,7 +231,13 @@ class TravelPayoutsService {
     }
 
     // Look up in map
-    return cityMap[normalized] || 'LAX'; // Default to LAX if not found
+    const code = cityMap[normalized];
+
+    if (!code) {
+      console.warn(`⚠️ Unknown city: "${cityName}" - defaulting to LAX`);
+    }
+
+    return code || 'LAX'; // Default to LAX if not found
   }
 
   /**

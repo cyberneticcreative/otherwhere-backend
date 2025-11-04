@@ -27,6 +27,14 @@ const server = http.createServer(app);
 // Middleware
 app.use(cors());
 app.use(morgan('combined'));
+
+// Capture raw body for webhook signature validation
+app.use('/webhook/elevenlabs', bodyParser.json({
+  verify: (req, res, buf) => {
+    req.rawBody = buf.toString('utf8');
+  }
+}));
+
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
@@ -52,9 +60,6 @@ app.post('/voice/status', voiceController.handleStatusCallback);
 // ElevenLabs webhooks
 app.post('/webhook/elevenlabs', webhookController.handleElevenLabsWebhook);
 app.post('/webhook/elevenlabs/tool-call', webhookController.handleElevenLabsToolCall);
-
-// n8n webhook (for trip processing)
-app.post('/webhook/trip-complete', webhookController.handleTripComplete);
 
 // Session management endpoints (for debugging)
 if (process.env.NODE_ENV === 'development') {

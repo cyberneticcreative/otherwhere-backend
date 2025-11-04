@@ -3,7 +3,6 @@ const llmService = require('../services/llmService');
 const assistantService = require('../services/assistantService');
 const realtimeService = require('../services/realtimeService');
 const elevenLabsService = require('../services/elevenLabsService');
-const n8nService = require('../services/n8nService');
 const sessionManager = require('../services/sessionManager');
 
 class VoiceController {
@@ -187,17 +186,24 @@ class VoiceController {
         content: responseText
       });
 
-      // If trip search data is present, trigger n8n workflow
-      if (tripSearchData && n8nService.isConfigured()) {
+      // If trip search data is present, search flights directly
+      if (tripSearchData) {
         try {
-          await n8nService.triggerTripSearch(tripSearchData, from, session.id);
+          const travelPayoutsService = require('../services/travelPayoutsService');
+          const results = await travelPayoutsService.searchFlights(tripSearchData);
+          const smsMessage = travelPayoutsService.formatSMSMessage(results);
+
+          // Send SMS with flight results
+          await twilioService.sendLongSMS(from, smsMessage);
 
           await sessionManager.updateSession(from, {
             tripDetails: tripSearchData,
             context: { ...session.context, tripSearchInitiated: true }
           });
-        } catch (n8nError) {
-          console.error('n8n workflow error:', n8nError);
+        } catch (searchError) {
+          console.error('Flight search error:', searchError);
+          // Send error message to user
+          await twilioService.sendSMS(from, "I'm having trouble finding flights right now. I'll keep working on it and get back to you!");
         }
       }
 

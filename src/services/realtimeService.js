@@ -225,9 +225,9 @@ class RealtimeService {
                 startDate: args.check_in,
                 endDate: args.check_out,
                 travelers: args.travelers || 1,
-                budget: args.budget_cad ? {
-                  amount: args.budget_cad,
-                  currency: 'CAD'
+                budget: args.budget_usd ? {
+                  amount: args.budget_usd,
+                  currency: 'USD'
                 } : null
               };
 

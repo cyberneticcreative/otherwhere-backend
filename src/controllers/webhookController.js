@@ -1,5 +1,4 @@
 const twilioService = require('../services/twilioService');
-const n8nService = require('../services/n8nService');
 const sessionManager = require('../services/sessionManager');
 const elevenLabsService = require('../services/elevenLabsService');
 
@@ -12,6 +11,12 @@ class WebhookController {
   async handleElevenLabsWebhook(req, res) {
     try {
       console.log('🔔 ElevenLabs webhook received');
+
+      // Validate webhook signature
+      if (!elevenLabsService.validateWebhookSignature(req.headers, req.rawBody || JSON.stringify(req.body))) {
+        console.error('❌ Invalid webhook signature - rejecting request');
+        return res.status(401).json({ error: 'Invalid signature' });
+      }
 
       const webhookData = elevenLabsService.processWebhook(req.body);
 
@@ -82,6 +87,12 @@ class WebhookController {
       console.log('🔧 ElevenLabs tool call webhook received');
       console.log('Payload:', JSON.stringify(req.body, null, 2));
 
+      // Validate webhook signature
+      if (!elevenLabsService.validateWebhookSignature(req.headers, req.rawBody || JSON.stringify(req.body))) {
+        console.error('❌ Invalid webhook signature - rejecting request');
+        return res.status(401).json({ error: 'Invalid signature' });
+      }
+
       const { tool_name, parameters, conversation_id, metadata } = req.body;
 
       // Handle search_trips function
@@ -114,44 +125,32 @@ class WebhookController {
         const phoneNumber = metadata?.phone_number || metadata?.from;
 
         try {
-          // Trigger trip search via n8n if configured
-          if (n8nService.isConfigured() && phoneNumber) {
-            await n8nService.triggerTripSearch(tripDetails, phoneNumber, conversation_id);
+          // Search flights directly via TravelPayouts
+          const travelPayoutsService = require('../services/travelPayoutsService');
+          const results = await travelPayoutsService.searchFlights(tripDetails);
+          const smsMessage = travelPayoutsService.formatSMSMessage(results);
 
-            // Update session
-            if (phoneNumber) {
-              await sessionManager.updateSession(phoneNumber, {
-                tripDetails,
-                context: {
-                  conversationId: conversation_id,
-                  tripSearchInitiated: true,
-                  tripSearchTimestamp: new Date().toISOString()
-                }
-              });
-            }
-
-            // Return success response to ElevenLabs
-            res.json({
-              result: `Perfect! I'm searching for trips to ${destination} from ${origin}, departing ${check_in} and returning ${check_out} for ${travelers} traveler(s). I'll text you the best options I find!`,
-              success: true
-            });
-
-          } else {
-            // Fallback: search flights directly
-            const travelPayoutsService = require('../services/travelPayoutsService');
-            const results = await travelPayoutsService.searchFlights(tripDetails);
-            const smsMessage = travelPayoutsService.formatSMSMessage(results);
-
-            // Send SMS if phone number available
-            if (phoneNumber) {
-              await twilioService.sendLongSMS(phoneNumber, smsMessage);
-            }
-
-            res.json({
-              result: `I found some great options! ${phoneNumber ? "I've texted you the details." : "Here are your flight options: " + smsMessage}`,
-              success: true
+          // Update session
+          if (phoneNumber) {
+            await sessionManager.updateSession(phoneNumber, {
+              tripDetails,
+              context: {
+                conversationId: conversation_id,
+                tripSearchInitiated: true,
+                tripSearchTimestamp: new Date().toISOString()
+              }
             });
           }
+
+          // Send SMS if phone number available
+          if (phoneNumber) {
+            await twilioService.sendLongSMS(phoneNumber, smsMessage);
+          }
+
+          res.json({
+            result: `I found some great options! ${phoneNumber ? "I've texted you the details." : "Here are your flight options: " + smsMessage}`,
+            success: true
+          });
 
         } catch (searchError) {
           console.error('Trip search error:', searchError);
@@ -181,86 +180,6 @@ class WebhookController {
     }
   }
 
-  /**
-   * Handle trip search completion webhook from n8n
-   * @param {Object} req - Express request
-   * @param {Object} res - Express response
-   */
-  async handleTripComplete(req, res) {
-    try {
-      console.log('🎉 Trip search completed webhook received');
-
-      const tripResults = n8nService.processTripResults(req.body);
-
-      const { userId, sessionId, success, results, error } = tripResults;
-
-      if (!userId) {
-        console.error('No userId in trip completion webhook');
-        return res.status(400).json({ error: 'userId is required' });
-      }
-
-      // Get user session
-      const session = await sessionManager.getSession(userId);
-
-      // Update session with results
-      await sessionManager.updateSession(userId, {
-        context: {
-          ...session.context,
-          tripSearchCompleted: true,
-          tripSearchResults: results,
-          tripSearchError: error || null
-        }
-      });
-
-      // Format results message
-      const messageFormat = session.channel === 'sms' ? 'short' : 'detailed';
-      const resultMessage = n8nService.formatTripResultsMessage(
-        tripResults,
-        messageFormat
-      );
-
-      // Send results to user based on their channel
-      if (session.channel === 'sms') {
-        await twilioService.sendLongSMS(userId, resultMessage);
-      } else if (session.channel === 'voice') {
-        // For voice, we might need to initiate a callback
-        // This depends on your workflow - you might want to:
-        // 1. Send an SMS with results
-        // 2. Make an outbound call
-        // 3. Store results for next call
-
-        // Option 1: Send SMS with results
-        await twilioService.sendSMS(
-          userId,
-          "Your trip search is ready! " + resultMessage
-        );
-      }
-
-      // Add assistant message to history
-      await sessionManager.addMessage(userId, {
-        role: 'assistant',
-        content: resultMessage,
-        metadata: {
-          tripResults: results,
-          source: 'trip_search_completion'
-        }
-      });
-
-      res.json({
-        success: true,
-        messageSent: true,
-        userId,
-        sessionId
-      });
-
-    } catch (error) {
-      console.error('Error handling trip completion webhook:', error);
-      res.status(500).json({
-        success: false,
-        error: error.message
-      });
-    }
-  }
 
   /**
    * Generic webhook handler for custom integrations
