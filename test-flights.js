@@ -126,11 +126,7 @@ async function testConfigurationCheck() {
   if (isConfigured) {
     console.log('✅ Google Flights API is configured');
     console.log(`   RAPIDAPI_KEY: ${process.env.RAPIDAPI_KEY.substring(0, 10)}...`);
-    console.log(`   RAPIDAPI_HOST: ${process.env.RAPIDAPI_HOST || 'google-flights2.p.rapidapi.com'}`);
-    console.log('\n   NOTE: If you see 403 errors, check:');
-    console.log('   - RapidAPI subscription status');
-    console.log('   - API key validity');
-    console.log('   - Rate limits\n');
+    console.log(`   RAPIDAPI_HOST: ${process.env.RAPIDAPI_HOST || 'google-flights2.p.rapidapi.com'}\n`);
   } else {
     console.log('❌ Google Flights API is NOT configured');
     console.log('   Please set RAPIDAPI_KEY in your .env file\n');
