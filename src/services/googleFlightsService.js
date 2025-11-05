@@ -626,9 +626,22 @@ class GoogleFlightsService {
       // Parse duration
       const durationText = flight.duration?.text || '';
 
-      // Get number of stops
-      const stops = flight.stops || 0;
+      // Get number of stops - check multiple possible fields
+      // If flight.stops is not present, calculate from number of flight segments
+      let stops = 0;
+      if (typeof flight.stops === 'number') {
+        stops = flight.stops;
+      } else if (flight.flights && Array.isArray(flight.flights)) {
+        // Number of stops = number of flight segments - 1
+        stops = Math.max(0, flight.flights.length - 1);
+      }
+
       const stopsText = stops === 0 ? 'Direct' : `${stops} stop${stops > 1 ? 's' : ''}`;
+
+      // Debug stops calculation for first flight
+      if (index === 0) {
+        console.log(`[GoogleFlights] Stops calculation - flight.stops: ${flight.stops}, flight.flights.length: ${flight.flights?.length}, calculated stops: ${stops}`);
+      }
 
       // Try multiple possible token fields for booking
       // Prioritize actual booking tokens over pagination tokens
