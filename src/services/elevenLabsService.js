@@ -1,8 +1,10 @@
 const axios = require('axios');
+const crypto = require('crypto');
 
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
 const TEXT_AGENT_ID = process.env.ELEVENLABS_TEXT_AGENT_ID;
 const VOICE_AGENT_ID = process.env.ELEVENLABS_VOICE_AGENT_ID;
+const WEBHOOK_SECRET = process.env.ELEVENLABS_WEBHOOK_SECRET;
 
 const BASE_URL = 'https://api.elevenlabs.io/v1';
 
@@ -107,6 +109,49 @@ class ElevenLabsService {
     } catch (error) {
       console.error('Failed to get agent config:', error.response?.data || error.message);
       throw error;
+    }
+  }
+
+  /**
+   * Validate ElevenLabs webhook signature
+   * @param {string} signature - Signature from x-elevenlabs-signature header
+   * @param {string|Buffer} payload - Raw request body
+   * @returns {boolean} True if signature is valid
+   */
+  validateWebhookSignature(signature, payload) {
+    if (!WEBHOOK_SECRET) {
+      console.warn('⚠️  ELEVENLABS_WEBHOOK_SECRET not configured - skipping signature validation');
+      return true; // Allow webhooks if secret is not configured (dev mode)
+    }
+
+    if (!signature) {
+      console.error('❌ No signature provided in webhook request');
+      return false;
+    }
+
+    try {
+      // Convert payload to string if it's a Buffer
+      const payloadString = Buffer.isBuffer(payload) ? payload.toString('utf8') : JSON.stringify(payload);
+
+      // Generate HMAC SHA-256 signature
+      const hmac = crypto.createHmac('sha256', WEBHOOK_SECRET);
+      hmac.update(payloadString);
+      const expectedSignature = hmac.digest('hex');
+
+      // Compare signatures (constant-time comparison to prevent timing attacks)
+      const isValid = crypto.timingSafeEqual(
+        Buffer.from(signature),
+        Buffer.from(expectedSignature)
+      );
+
+      if (!isValid) {
+        console.error('❌ Invalid webhook signature');
+      }
+
+      return isValid;
+    } catch (error) {
+      console.error('❌ Error validating webhook signature:', error.message);
+      return false;
     }
   }
 

@@ -1,5 +1,4 @@
 const twilioService = require('../services/twilioService');
-const n8nService = require('../services/n8nService');
 const sessionManager = require('../services/sessionManager');
 const elevenLabsService = require('../services/elevenLabsService');
 const googleFlightsService = require('../services/googleFlightsService');
@@ -13,6 +12,15 @@ class WebhookController {
   async handleElevenLabsWebhook(req, res) {
     try {
       console.log('🔔 ElevenLabs webhook received');
+
+      // Validate webhook signature
+      const signature = req.headers['x-elevenlabs-signature'];
+      const isValid = elevenLabsService.validateWebhookSignature(signature, req.body);
+
+      if (!isValid) {
+        console.error('❌ Invalid ElevenLabs webhook signature');
+        return res.status(401).json({ success: false, error: 'Invalid signature' });
+      }
 
       const webhookData = elevenLabsService.processWebhook(req.body);
 
@@ -81,6 +89,20 @@ class WebhookController {
   async handleElevenLabsToolCall(req, res) {
     try {
       console.log('🔧 ElevenLabs tool call webhook received');
+
+      // Validate webhook signature
+      const signature = req.headers['x-elevenlabs-signature'];
+      const isValid = elevenLabsService.validateWebhookSignature(signature, req.body);
+
+      if (!isValid) {
+        console.error('❌ Invalid ElevenLabs tool call webhook signature');
+        return res.status(401).json({
+          result: 'Unauthorized webhook request',
+          success: false,
+          error: 'Invalid signature'
+        });
+      }
+
       console.log('Payload:', JSON.stringify(req.body, null, 2));
 
       const { tool_name, parameters, conversation_id, metadata } = req.body;
@@ -233,87 +255,6 @@ class WebhookController {
       console.error('Error handling ElevenLabs tool call:', error);
       res.status(500).json({
         result: 'Sorry, I encountered an error processing your request.',
-        success: false,
-        error: error.message
-      });
-    }
-  }
-
-  /**
-   * Handle trip search completion webhook from n8n
-   * @param {Object} req - Express request
-   * @param {Object} res - Express response
-   */
-  async handleTripComplete(req, res) {
-    try {
-      console.log('🎉 Trip search completed webhook received');
-
-      const tripResults = n8nService.processTripResults(req.body);
-
-      const { userId, sessionId, success, results, error } = tripResults;
-
-      if (!userId) {
-        console.error('No userId in trip completion webhook');
-        return res.status(400).json({ error: 'userId is required' });
-      }
-
-      // Get user session
-      const session = await sessionManager.getSession(userId);
-
-      // Update session with results
-      await sessionManager.updateSession(userId, {
-        context: {
-          ...session.context,
-          tripSearchCompleted: true,
-          tripSearchResults: results,
-          tripSearchError: error || null
-        }
-      });
-
-      // Format results message
-      const messageFormat = session.channel === 'sms' ? 'short' : 'detailed';
-      const resultMessage = n8nService.formatTripResultsMessage(
-        tripResults,
-        messageFormat
-      );
-
-      // Send results to user based on their channel
-      if (session.channel === 'sms') {
-        await twilioService.sendLongSMS(userId, resultMessage);
-      } else if (session.channel === 'voice') {
-        // For voice, we might need to initiate a callback
-        // This depends on your workflow - you might want to:
-        // 1. Send an SMS with results
-        // 2. Make an outbound call
-        // 3. Store results for next call
-
-        // Option 1: Send SMS with results
-        await twilioService.sendSMS(
-          userId,
-          "Your trip search is ready! " + resultMessage
-        );
-      }
-
-      // Add assistant message to history
-      await sessionManager.addMessage(userId, {
-        role: 'assistant',
-        content: resultMessage,
-        metadata: {
-          tripResults: results,
-          source: 'trip_search_completion'
-        }
-      });
-
-      res.json({
-        success: true,
-        messageSent: true,
-        userId,
-        sessionId
-      });
-
-    } catch (error) {
-      console.error('Error handling trip completion webhook:', error);
-      res.status(500).json({
         success: false,
         error: error.message
       });

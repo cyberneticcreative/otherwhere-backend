@@ -33,10 +33,6 @@ const WEBHOOK_EVENTS = {
     CONVERSATION_MESSAGE: 'conversation.message',
     CONVERSATION_ENDED: 'conversation.ended',
     AGENT_ACTION: 'agent.action'
-  },
-  N8N: {
-    TRIP_SEARCH_COMPLETE: 'trip_search_complete',
-    TRIP_SEARCH_ERROR: 'trip_search_error'
   }
 };
 
@@ -44,7 +40,7 @@ const ERROR_MESSAGES = {
   GENERIC: "I'm sorry, I encountered an error. Please try again.",
   OPENAI_ERROR: "I'm having trouble thinking right now. Please try again in a moment.",
   TWILIO_ERROR: "I'm having trouble sending messages right now. Please try again later.",
-  N8N_ERROR: "I'm having trouble searching for trips right now. Let me try a different approach.",
+  FLIGHT_SEARCH_ERROR: "I'm having trouble searching for flights right now. Let me try a different approach.",
   SESSION_ERROR: "I'm having trouble accessing your conversation history. Let's start fresh."
 };
 

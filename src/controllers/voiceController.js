@@ -3,7 +3,6 @@ const llmService = require('../services/llmService');
 const assistantService = require('../services/assistantService');
 const realtimeService = require('../services/realtimeService');
 const elevenLabsService = require('../services/elevenLabsService');
-const n8nService = require('../services/n8nService');
 const sessionManager = require('../services/sessionManager');
 
 class VoiceController {
@@ -187,22 +186,8 @@ class VoiceController {
         content: responseText
       });
 
-      // If trip search data is present, trigger n8n workflow
-      if (tripSearchData && n8nService.isConfigured()) {
-        try {
-          await n8nService.triggerTripSearch(tripSearchData, from, session.id);
-
-          await sessionManager.updateSession(from, {
-            tripDetails: tripSearchData,
-            context: { ...session.context, tripSearchInitiated: true }
-          });
-        } catch (n8nError) {
-          console.error('n8n workflow error:', n8nError);
-        }
-      }
-
       // Generate TwiML response
-      const shouldContinue = !tripSearchData; // End call if trip search initiated
+      const shouldContinue = true; // Continue conversation
 
       const twiml = twilioService.generateVoiceResponse(
         responseText,

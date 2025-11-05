@@ -54,9 +54,6 @@ app.post('/voice/status', voiceController.handleStatusCallback);
 app.post('/webhook/elevenlabs', webhookController.handleElevenLabsWebhook);
 app.post('/webhook/elevenlabs/tool-call', webhookController.handleElevenLabsToolCall);
 
-// n8n webhook (for trip processing)
-app.post('/webhook/trip-complete', webhookController.handleTripComplete);
-
 // Flight search API endpoints
 app.post('/api/flights/search', async (req, res) => {
   try {

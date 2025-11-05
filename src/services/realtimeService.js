@@ -225,9 +225,9 @@ class RealtimeService {
                 startDate: args.check_in,
                 endDate: args.check_out,
                 travelers: args.travelers || 1,
-                budget: args.budget_cad ? {
-                  amount: args.budget_cad,
-                  currency: 'CAD'
+                budget: args.budget_usd ? {
+                  amount: args.budget_usd,
+                  currency: 'USD'
                 } : null
               };
 
@@ -290,9 +290,12 @@ class RealtimeService {
                 } catch (err) {
                   console.error(`❌ Flight search error:`, err.message);
                   try {
-                    await twilioService.sendSMS(from, "I found your trip details! I'm searching for flights and will text you the results shortly.");
+                    await twilioService.sendSMS(
+                      from,
+                      `Sorry, I had trouble finding flights from ${tripDetails.origin} to ${tripDetails.destination}. Please try different cities or dates, or text me for help!`
+                    );
                   } catch (e) {
-                    console.error('Failed to send fallback SMS:', e);
+                    console.error('Failed to send error SMS:', e);
                   }
                 }
               })();

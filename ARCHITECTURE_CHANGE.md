@@ -1,7 +1,32 @@
-# ⚠️ BACKEND DEPRECATED
+# ⚠️ THIS DOCUMENT IS OUTDATED
+
+**This architecture change was NOT implemented.**
+
+The backend was planned to be deprecated in favor of Twilio Functions + n8n, but that migration never happened. The Express backend is still actively maintained and in production use.
+
+**See `ARCHITECTURE.md` for the current, accurate architecture documentation.**
+
+---
+
+## What Actually Happened
+
+The backend continues to be the primary service for Otherwhere. Recent updates include:
+- Removed n8n integration (not needed)
+- Using TravelPayouts and Google Flights APIs directly
+- ElevenLabs integration for voice
+- OpenAI Assistants API for SMS
+- Webhook signature validation for security
+
+**Do not refer to this document for current architecture information.**
+
+---
+
+# Original Document (OUTDATED - DO NOT USE)
+
+# ⚠️ BACKEND DEPRECATED (THIS DID NOT HAPPEN)
 
 **Date:** October 30, 2025
-**Reason:** Simplified architecture - backend middleware no longer needed
+**Reason:** Simplified architecture - backend middleware no longer needed (THIS CHANGE WAS NOT MADE)
 
 ## Previous Architecture (Deprecated)
 
