@@ -65,24 +65,29 @@ class GoogleFlightsService {
       throw new Error('Google Flights API not configured - missing RAPIDAPI_KEY');
     }
 
+    // Clean up query - remove common country suffixes that confuse the API
+    let cleanQuery = query
+      .replace(/,?\s*(England|UK|United Kingdom|USA|US|United States|Canada)$/i, '')
+      .trim();
+
     // Check cache first
-    const cacheKey = `${query.toLowerCase()}_${countryCode}`;
+    const cacheKey = `${cleanQuery.toLowerCase()}_${countryCode}`;
     const cached = this.airportCache.get(cacheKey);
 
     if (cached && (Date.now() - cached.timestamp < this.CACHE_TTL)) {
-      console.log(`[GoogleFlights] Using cached airports for: ${query}`);
+      console.log(`[GoogleFlights] Using cached airports for: ${cleanQuery}`);
       return cached.data;
     }
 
     try {
-      console.log(`[GoogleFlights] Searching airports for: ${query}`);
+      console.log(`[GoogleFlights] Searching airports for: ${cleanQuery}${cleanQuery !== query ? ` (cleaned from "${query}")` : ''}`);
 
       // Add rate limiting delay
       await this.rateLimitDelay();
 
       const response = await axios.get(`${BASE_URL}/searchAirport`, {
         params: {
-          query,
+          query: cleanQuery,
           language_code: languageCode,
           country_code: countryCode
         },
@@ -300,9 +305,23 @@ class GoogleFlightsService {
         timeout: 10000
       });
 
+      // Debug: log the actual response
+      console.log(`[GoogleFlights] Booking API response:`, JSON.stringify(response.data, null, 2));
+
+      // Try multiple possible field names for the booking URL
+      const bookingUrl = response.data?.url
+        || response.data?.booking_url
+        || response.data?.bookingUrl
+        || response.data?.data?.url
+        || response.data?.data?.booking_url;
+
+      if (!bookingUrl) {
+        console.warn(`[GoogleFlights] Could not find booking URL in response. Available fields:`, Object.keys(response.data || {}));
+      }
+
       return {
         success: true,
-        bookingUrl: response.data?.url || response.data?.booking_url,
+        bookingUrl: bookingUrl,
         data: response.data
       };
 
