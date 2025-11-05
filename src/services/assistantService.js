@@ -379,7 +379,7 @@ class AssistantService {
                 const formattedProperties = airbnbService.formatPropertyResults(searchResults, 3, {
                   privateOnly: true,
                   minRating: 4.0,
-                  minReviews: 3
+                  minReviews: 0 // Allow new listings
                 });
 
                 // Store formatted results for SMS sending later
