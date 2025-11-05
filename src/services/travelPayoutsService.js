@@ -3,6 +3,17 @@ const axios = require('axios');
 const TRAVELPAYOUTS_TOKEN = process.env.TRAVELPAYOUTS_TOKEN;
 const AVIASALES_MARKER = process.env.AVIASALES_MARKER;
 
+/**
+ * TravelPayouts/Aviasales Flight Search Service
+ *
+ * ⚠️  CURRENTLY INACTIVE - NOT IN USE
+ * Waiting for affiliate program approval from TravelPayouts/Aviasales.
+ *
+ * This service is kept for future use once API access is granted.
+ * All flight searches currently use Google Flights API instead.
+ *
+ * See: googleFlightsService.js for the active implementation
+ */
 class TravelPayoutsService {
   /**
    * Search for flights based on trip parameters

@@ -6,21 +6,27 @@ This document outlines the current service architecture and guidelines for addin
 
 ### Flight Search Services
 
-#### 1. **Google Flights API** (Active - Primary)
+#### 1. **Google Flights API** (✅ ACTIVE - PRIMARY - ONLY SERVICE IN USE)
 - **File**: `src/services/googleFlightsService.js`
 - **Provider**: RapidAPI (Google Flights v2)
-- **Status**: ✅ Active and operational
+- **Status**: ✅ **ACTIVE - This is the ONLY flight search service currently operational**
+- **Used in ALL flight searches across:**
+  - SMS Controller (OpenAI Assistants API)
+  - Webhook Controller (ElevenLabs tool calls)
+  - Realtime Service (OpenAI Realtime API)
+  - Assistant Service (function calling)
+  - Direct API endpoint (`/api/flights/search`)
 - **Capabilities**:
-  - Airport code resolution (city name → airport code)
+  - Airport code resolution (city name → airport code) - DYNAMIC LOOKUP
   - Flight search (one-way and round-trip)
   - Booking URL generation
-  - Price graphs (Phase 2)
-  - Calendar picker (Phase 2)
+  - SMS-formatted results
+  - Supports 150+ cities worldwide
 
-#### 2. **TravelPayouts API** (Legacy - Inactive)
+#### 2. **TravelPayouts API** (⚠️ INACTIVE - NOT IN USE)
 - **File**: `src/services/travelPayoutsService.js`
-- **Status**: ⚠️ Inactive (awaiting proper API access)
-- **Note**: Keep for future use when access is granted
+- **Status**: ⚠️ **INACTIVE** - Waiting for affiliate program approval
+- **Note**: Kept for future use when API access is granted. Not currently imported or used anywhere in the codebase.
 
 ### Accommodation Services
 

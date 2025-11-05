@@ -7,7 +7,17 @@ const BASE_URL = `https://${RAPIDAPI_HOST}/api/v1`;
 
 /**
  * Google Flights API Service via RapidAPI
- * Provides flight search, airport lookup, and booking URL generation
+ *
+ * THIS IS THE PRIMARY FLIGHT SEARCH SERVICE
+ * All flight searches currently use this API as it's the only one with active access.
+ *
+ * Provides:
+ * - Airport code resolution (city names → IATA codes)
+ * - Flight search (one-way and round-trip)
+ * - Booking URL generation
+ * - SMS-formatted results
+ *
+ * Note: TravelPayouts service exists but is inactive (waiting for API approval)
  */
 class GoogleFlightsService {
   constructor() {
