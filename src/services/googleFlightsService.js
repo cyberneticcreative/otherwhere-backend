@@ -525,8 +525,9 @@ class GoogleFlightsService {
       return 'Sorry, no flights found for your search. Try different dates or airports.';
     }
 
-    const { departureId, arrivalId, outboundDate } = searchInfo;
-    const header = `✈️ Flights ${departureId} → ${arrivalId} (${outboundDate})\nPrices in USD\n\n`;
+    const { departureId, arrivalId, outboundDate, currency } = searchInfo;
+    const currencyLabel = currency || 'USD';
+    const header = `✈️ Flights ${departureId} → ${arrivalId} (${outboundDate})\nPrices in ${currencyLabel}\n\n`;
 
     const flightsList = formattedFlights.map(flight => {
       // Parse time from format "26-11-2025 08:53 PM" to just "8:53 AM"
@@ -542,8 +543,11 @@ class GoogleFlightsService {
       const departTime = parseTime(flight.departure);
       const arriveTime = parseTime(flight.arrival);
 
+      // Use displayPrice if available (converted currency), otherwise use price
+      const priceDisplay = flight.displayPrice || `$${flight.price}`;
+
       return `${flight.index}. ${flight.airline}
-$${flight.price} • ${departTime} - ${arriveTime}
+${priceDisplay} • ${departTime} - ${arriveTime}
 ${flight.duration} • ${flight.stopsText}`;
     }).join('\n\n');
 

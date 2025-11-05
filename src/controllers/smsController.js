@@ -75,9 +75,11 @@ class SMSController {
             }
           }
 
+          const priceDisplay = selectedFlight.displayPrice || `$${selectedFlight.price}`;
+
           const bookingMessage = bookingUrl
-            ? `Great choice! ✈️\n\n${selectedFlight.airline} - $${selectedFlight.price}\n${selectedFlight.departure} → ${selectedFlight.arrival}\n\n🔗 Book here: ${bookingUrl}`
-            : `Great choice! ✈️\n\n${selectedFlight.airline} - $${selectedFlight.price}\n${selectedFlight.departure} → ${selectedFlight.arrival}\n\nPlease search on Google Flights for this route.`;
+            ? `Great choice! ✈️\n\n${selectedFlight.airline} - ${priceDisplay}\n${selectedFlight.departure} → ${selectedFlight.arrival}\n\n🔗 Book here: ${bookingUrl}`
+            : `Great choice! ✈️\n\n${selectedFlight.airline} - ${priceDisplay}\n${selectedFlight.departure} → ${selectedFlight.arrival}\n\nPlease search on Google Flights for this route.`;
 
           await twilioService.sendSMS(from, bookingMessage);
 
@@ -168,9 +170,16 @@ class SMSController {
       if (flightResults && flightResults.flights && flightResults.flights.length > 0) {
         console.log('✈️ Sending flight results as separate SMS...');
 
+        // Convert prices to local currency based on origin airport
+        const currencyService = require('../services/currencyService');
+        const convertedFlights = await currencyService.convertFlightPrices(
+          flightResults.flights,
+          flightResults.originCode
+        );
+
         // Store flight results and search details in session so user can select one later
         await sessionManager.updateSession(from, {
-          lastFlightResults: flightResults.flights,
+          lastFlightResults: convertedFlights,
           lastFlightSearch: {
             origin: flightResults.originCode,
             destination: flightResults.destCode,
@@ -178,17 +187,18 @@ class SMSController {
             endDate: flightResults.searchParams?.returnDate
           }
         });
-        console.log(`💾 Stored ${flightResults.flights.length} flights in session for ${from}`);
-        console.log(`💾 Flight tokens:`, flightResults.flights.map((f, i) => `${i+1}: ${f.bookingToken ? 'has token' : 'NO TOKEN'}`));
+        console.log(`💾 Stored ${convertedFlights.length} flights in session for ${from}`);
+        console.log(`💾 Flight tokens:`, convertedFlights.map((f, i) => `${i+1}: ${f.bookingToken ? 'has token' : 'NO TOKEN'}`));
 
         // Use Google Flights service for formatting
         const googleFlightsService = require('../services/googleFlightsService');
         const flightMessage = googleFlightsService.formatSMSMessage(
-          flightResults.flights,
+          convertedFlights,
           {
             departureId: flightResults.originCode,
             arrivalId: flightResults.destCode,
-            outboundDate: flightResults.searchParams?.outboundDate
+            outboundDate: flightResults.searchParams?.outboundDate,
+            currency: convertedFlights[0]?.currency || 'USD'
           }
         );
 
