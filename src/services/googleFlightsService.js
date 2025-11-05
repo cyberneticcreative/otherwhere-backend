@@ -421,9 +421,77 @@ class GoogleFlightsService {
   }
 
   /**
+   * Get booking details for a specific flight
+   * This returns all available booking partners and their prices
+   *
+   * @param {string} bookingToken - Booking token from search results
+   * @param {string} [currency] - Currency code (default: USD)
+   * @param {string} [languageCode] - Language code (default: en-US)
+   * @param {string} [countryCode] - Country code (default: US)
+   * @returns {Promise<Object>} Booking details with partner options
+   */
+  async getBookingDetails(bookingToken, currency = 'USD', languageCode = 'en-US', countryCode = 'US') {
+    if (!this.isConfigured()) {
+      throw new Error('Google Flights API not configured - missing RAPIDAPI_KEY');
+    }
+
+    if (!bookingToken) {
+      throw new Error('Booking token is required to get booking details');
+    }
+
+    try {
+      console.log(`[GoogleFlights] Getting booking details for token: ${bookingToken.substring(0, 20)}...`);
+
+      // Add rate limiting delay
+      await this.rateLimitDelay();
+
+      const response = await axios.get(`${BASE_URL}/getBookingDetails`, {
+        params: {
+          booking_token: bookingToken,
+          currency,
+          language_code: languageCode,
+          country_code: countryCode
+        },
+        headers: this.defaultHeaders,
+        timeout: 15000
+      });
+
+      // Debug: log the actual response structure
+      console.log(`[GoogleFlights] Booking details response keys:`, Object.keys(response.data || {}));
+
+      const data = response.data?.data || response.data;
+      const bookingOptions = data?.booking_options || data?.bookingOptions || [];
+
+      console.log(`[GoogleFlights] Found ${bookingOptions.length} booking partner(s)`);
+
+      // Log first partner details if available
+      if (bookingOptions.length > 0) {
+        const firstPartner = bookingOptions[0];
+        console.log(`[GoogleFlights] First partner:`, {
+          name: firstPartner.name || firstPartner.partner_name,
+          price: firstPartner.price,
+          hasToken: !!(firstPartner.token || firstPartner.booking_token)
+        });
+      }
+
+      return {
+        success: true,
+        bookingOptions: bookingOptions,
+        selectedFlights: data?.selected_flights || data?.selectedFlights || [],
+        baggagePrices: data?.baggage_prices || data?.baggagePrices || [],
+        rawData: data
+      };
+
+    } catch (error) {
+      console.error(`[GoogleFlights] Booking details error:`, error.message);
+      throw new Error(`Failed to get booking details: ${error.message}`);
+    }
+  }
+
+  /**
    * Get booking URL for a specific flight
    *
-   * @param {string} token - Flight token from search results
+   * @param {string} token - Flight token from search results or partner token from booking details
    * @returns {Promise<Object>} Booking URL and details
    */
   async getBookingURL(token) {
