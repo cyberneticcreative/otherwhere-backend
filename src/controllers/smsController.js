@@ -21,6 +21,37 @@ class SMSController {
       const session = await sessionManager.getSession(from);
       await sessionManager.updateSession(from, { channel: 'sms' });
 
+      // Check if user is selecting a flight number (1, 2, or 3)
+      const flightSelection = body.trim().match(/^([123])$/);
+      if (flightSelection && session.lastFlightResults) {
+        const selectedIndex = parseInt(flightSelection[1]) - 1;
+        const selectedFlight = session.lastFlightResults[selectedIndex];
+
+        if (selectedFlight && selectedFlight.bookingToken) {
+          console.log(`✈️ User selected flight #${flightSelection[1]}, fetching booking URL...`);
+
+          try {
+            const googleFlightsService = require('../services/googleFlightsService');
+            const bookingData = await googleFlightsService.getBookingURL(selectedFlight.bookingToken);
+
+            const bookingMessage = `Great choice! ✈️\n\n${selectedFlight.airline} - $${selectedFlight.price}\n${selectedFlight.departure} → ${selectedFlight.arrival}\n\n🔗 Book here: ${bookingData.bookingUrl}`;
+
+            await twilioService.sendSMS(from, bookingMessage);
+
+            res.type('text/xml');
+            res.send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+
+            const totalDuration = Date.now() - startTime;
+            console.log(`⏱️  TOTAL request time: ${totalDuration}ms (${(totalDuration/1000).toFixed(1)}s)`);
+            return;
+
+          } catch (error) {
+            console.error('❌ Error getting booking URL:', error);
+            // Fall through to normal assistant handling
+          }
+        }
+      }
+
       // Add user message to conversation history
       await sessionManager.addMessage(from, {
         role: 'user',
@@ -98,6 +129,12 @@ class SMSController {
       // If we have flight results, send them as a separate SMS
       if (flightResults && flightResults.flights && flightResults.flights.length > 0) {
         console.log('✈️ Sending flight results as separate SMS...');
+
+        // Store flight results in session so user can select one later
+        await sessionManager.updateSession(from, {
+          lastFlightResults: flightResults.flights
+        });
+        console.log(`💾 Stored ${flightResults.flights.length} flights in session`);
 
         // Use Google Flights service for formatting
         const googleFlightsService = require('../services/googleFlightsService');
