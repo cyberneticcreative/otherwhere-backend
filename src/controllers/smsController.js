@@ -29,10 +29,10 @@ class SMSController {
       console.log(`🔍 Session check - lastFlightResults exists: ${!!session.lastFlightResults}, count: ${session.lastFlightResults?.length || 0}`);
 
       // Check if user is selecting a flight number (1, 2, or 3)
-      // Only match if the ENTIRE message is exactly "1", "2", or "3"
-      // This prevents "Jan 3-18" or "December 1" from triggering
+      // Only match if message is short (<15 chars) to avoid matching dates/counts
+      // This prevents "December 1" or "1 person" from triggering
       const isShortMessage = body.trim().length < 15;
-      const flightSelection = isShortMessage ? body.trim().match(/^([123])$/) : null;
+      const flightSelection = isShortMessage ? body.trim().match(/\b([123])\b/) : null;
       console.log(`🔍 Flight selection check - matched: ${!!flightSelection}, short: ${isShortMessage}, body: "${body}"`);
 
       if (flightSelection && session.lastFlightResults) {
@@ -45,48 +45,27 @@ class SMSController {
           let bookingUrl = null;
           let urlType = 'none'; // Track which method was used for logging
 
-          // STRATEGY 1: Try three-step booking flow (booking details → partner → URL)
+          // STRATEGY 1: Try RapidAPI getBookingURL first (direct booking page)
           if (selectedFlight.bookingToken) {
             try {
-              console.log(`🎫 Step 1: Getting booking details for all partners...`);
-              const bookingDetails = await googleFlightsService.getBookingDetails(selectedFlight.bookingToken);
+              console.log(`🎫 Attempting to get booking URL via RapidAPI token...`);
+              const bookingData = await googleFlightsService.getBookingURL(selectedFlight.bookingToken);
 
-              if (bookingDetails.bookingOptions && bookingDetails.bookingOptions.length > 0) {
-                console.log(`✅ Found ${bookingDetails.bookingOptions.length} booking partner(s)`);
-
-                // Select best partner (prefer lowest price, or first if prices are same)
-                const bestPartner = bookingDetails.bookingOptions.reduce((best, current) => {
-                  const bestPrice = best.price || Infinity;
-                  const currentPrice = current.price || Infinity;
-                  return currentPrice < bestPrice ? current : best;
-                }, bookingDetails.bookingOptions[0]);
-
-                console.log(`🏆 Selected partner: ${bestPartner.name || bestPartner.partner_name || 'Unknown'} - $${bestPartner.price}`);
-
-                // Get partner's token
-                const partnerToken = bestPartner.token || bestPartner.booking_token;
-
-                if (partnerToken) {
-                  console.log(`🎫 Step 2: Getting booking URL from partner token...`);
-                  const bookingData = await googleFlightsService.getBookingURL(partnerToken);
-
-                  // Check if we got a valid booking URL
-                  if (bookingData.bookingUrl) {
-                    bookingUrl = bookingData.bookingUrl;
-                    urlType = bookingData.bookingUrl.includes('/booking?tfs=') ? 'api-booking-direct' : 'api-booking-redirect';
-                    console.log(`✅ SUCCESS: Got booking URL via partner token`);
-                    console.log(`🔗 URL type: ${urlType}, ${bookingUrl.substring(0, 80)}...`);
-                  } else {
-                    console.warn(`⚠️ Partner token API returned no booking URL`);
-                  }
-                } else {
-                  console.warn(`⚠️ Best partner has no token available`);
-                }
+              // Check if we got a valid booking page URL (not just a search URL)
+              if (bookingData.bookingUrl && bookingData.bookingUrl.includes('/booking?tfs=')) {
+                bookingUrl = bookingData.bookingUrl;
+                urlType = 'api-booking';
+                console.log(`✅ SUCCESS: Got direct booking page URL from API`);
+                console.log(`🔗 URL type: ${bookingUrl.substring(0, 80)}...`);
+              } else if (bookingData.bookingUrl) {
+                console.warn(`⚠️ API returned URL but not a booking page: ${bookingData.bookingUrl.substring(0, 80)}...`);
+                // Continue to fallback
               } else {
-                console.warn(`⚠️ No booking partners found in booking details`);
+                console.warn(`⚠️ API returned no booking URL in response`);
+                // Continue to fallback
               }
             } catch (error) {
-              console.warn(`⚠️ Booking details flow failed: ${error.message}`);
+              console.warn(`⚠️ Token API failed: ${error.message}`);
               // Continue to fallback
             }
           } else {
