@@ -453,7 +453,7 @@ class GoogleFlightsService {
           country_code: countryCode
         },
         headers: this.defaultHeaders,
-        timeout: 15000
+        timeout: 25000 // Increased to 25s - this endpoint is slower
       });
 
       // Debug: log the actual response structure
@@ -514,7 +514,7 @@ class GoogleFlightsService {
             ...this.defaultHeaders,
             'Content-Type': 'application/json'
           },
-          timeout: 10000
+          timeout: 15000 // Increased to 15s for reliability
         }
       );
 
