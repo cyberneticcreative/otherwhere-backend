@@ -547,7 +547,7 @@ $${flight.price} • ${departTime} - ${arriveTime}
 ${flight.duration} • ${flight.stopsText}`;
     }).join('\n\n');
 
-    return header + flightsList + '\n\nReply with a number to get booking link.';
+    return header + flightsList + '\n\nReply with JUST the number (1, 2, or 3) to get your booking link.';
   }
 
   /**

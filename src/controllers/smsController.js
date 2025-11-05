@@ -28,7 +28,8 @@ class SMSController {
       console.log(`🔍 Session check - lastFlightResults exists: ${!!session.lastFlightResults}, count: ${session.lastFlightResults?.length || 0}`);
 
       // Check if user is selecting a flight number (1, 2, or 3)
-      const flightSelection = body.trim().match(/^([123])$/);
+      // Match "1", "2", "3" anywhere in the message (standalone digit)
+      const flightSelection = body.trim().match(/\b([123])\b/);
       console.log(`🔍 Flight selection check - matched: ${!!flightSelection}, body: "${body}"`);
 
       if (flightSelection && session.lastFlightResults) {
