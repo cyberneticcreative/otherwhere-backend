@@ -477,6 +477,86 @@ class GoogleFlightsService {
   }
 
   /**
+   * Get next flights in a multi-leg journey (for round-trip or multi-city)
+   *
+   * For round-trip and multi-city flights, the initial searchFlights() returns
+   * flights with next_token instead of booking_token. This method should be called
+   * with that next_token to get subsequent flight legs, and eventually the booking_token.
+   *
+   * @param {string} token - The next_token from previous search/getNextFlights call
+   * @param {string} [currency] - Currency code (default: USD)
+   * @param {string} [languageCode] - Language code (default: en-US)
+   * @param {string} [countryCode] - Country code (default: US)
+   * @returns {Promise<Object>} Next flight options with possible booking_token
+   */
+  async getNextFlights(token, currency = 'USD', languageCode = 'en-US', countryCode = 'US') {
+    if (!this.isConfigured()) {
+      throw new Error('Google Flights API not configured - missing RAPIDAPI_KEY');
+    }
+
+    if (!token) {
+      throw new Error('Token is required to get next flights');
+    }
+
+    try {
+      console.log(`[GoogleFlights] Getting next flights for token: ${token.substring(0, 20)}...`);
+
+      // Add rate limiting delay
+      await this.rateLimitDelay();
+
+      const response = await axios.post(`${BASE_URL}/getNextFlights`,
+        { token },
+        {
+          headers: {
+            ...this.defaultHeaders,
+            'Content-Type': 'application/json'
+          },
+          params: {
+            currency,
+            language_code: languageCode,
+            country_code: countryCode
+          },
+          timeout: 20000
+        }
+      );
+
+      const data = response.data?.data || response.data;
+
+      // Debug: Log response structure
+      console.log(`[GoogleFlights] getNextFlights response structure:`, {
+        hasData: !!data,
+        topLevelKeys: Object.keys(response.data || {}),
+        dataKeys: Object.keys(data || {})
+      });
+
+      // Check if we got flights with booking_token or another next_token
+      const flights = data?.itineraries?.topFlights || data?.itineraries?.otherFlights || data?.flights || [];
+      const sampleFlight = flights[0];
+
+      if (sampleFlight) {
+        const hasBookingToken = !!sampleFlight.booking_token;
+        const hasNextToken = !!sampleFlight.next_token;
+        console.log(`[GoogleFlights] Next flight tokens: booking_token=${hasBookingToken}, next_token=${hasNextToken}`);
+      }
+
+      return {
+        success: true,
+        data: data,
+        flights: flights
+      };
+
+    } catch (error) {
+      console.error(`[GoogleFlights] getNextFlights error:`, error.message);
+
+      if (error.response?.status === 429) {
+        throw new Error('Flight search rate limit exceeded. Please try again in a few minutes.');
+      }
+
+      throw new Error(`Failed to get next flights: ${error.message}`);
+    }
+  }
+
+  /**
    * Get price graph/trends for a route
    *
    * @param {Object} params - Parameters
@@ -618,17 +698,34 @@ class GoogleFlightsService {
       const stopsText = stops === 0 ? 'Direct' : `${stops} stop${stops > 1 ? 's' : ''}`;
 
       // Try multiple possible token fields for booking
-      const bookingToken = flight.token
-        || flight.booking_token
-        || flight.purchase_token
-        || flight.next_token
-        || flight.id
-        || '';
+      // Priority: booking_token > token > purchase_token > next_token > id
+      let bookingToken = '';
+      let bookingTokenSource = null;
+
+      if (flight.booking_token) {
+        bookingToken = flight.booking_token;
+        bookingTokenSource = 'booking_token';
+      } else if (flight.token) {
+        bookingToken = flight.token;
+        bookingTokenSource = 'token';
+      } else if (flight.purchase_token) {
+        bookingToken = flight.purchase_token;
+        bookingTokenSource = 'purchase_token';
+      } else if (flight.next_token) {
+        bookingToken = flight.next_token;
+        bookingTokenSource = 'next_token';
+      } else if (flight.id) {
+        bookingToken = flight.id;
+        bookingTokenSource = 'id';
+      }
 
       // Debug: log available fields for first flight
       if (index === 0) {
         console.log(`[GoogleFlights] Sample flight keys:`, Object.keys(flight));
-        console.log(`[GoogleFlights] Using booking token from field: ${bookingToken ? Object.keys(flight).find(k => flight[k] === bookingToken) : 'NONE'}`);
+        console.log(`[GoogleFlights] Using booking token from field: ${bookingTokenSource || 'NONE'}`);
+        if (bookingTokenSource === 'next_token') {
+          console.log(`[GoogleFlights] ⚠️ Flight has next_token (not booking_token) - will need to call getNextFlights`);
+        }
       }
 
       return {
@@ -643,6 +740,7 @@ class GoogleFlightsService {
         stops,
         stopsText,
         bookingToken: bookingToken,
+        bookingTokenSource: bookingTokenSource, // NEW: track which field we used
         airlineLogo: flight.airline_logo || '',
         carbonEmissions: flight.carbon_emissions,
         layovers: flight.layovers || null,

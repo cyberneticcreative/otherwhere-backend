@@ -44,12 +44,38 @@ class SMSController {
 
           let bookingUrl = null;
           let urlType = 'none'; // Track which method was used for logging
+          let finalBookingToken = selectedFlight.bookingToken;
+
+          // STRATEGY 0: Check if we need to resolve next_token to booking_token first
+          if (selectedFlight.bookingToken && selectedFlight.bookingTokenSource === 'next_token') {
+            try {
+              console.log(`🔄 Flight has next_token, need to call getNextFlights to get booking_token...`);
+              const nextFlightsData = await googleFlightsService.getNextFlights(selectedFlight.bookingToken);
+
+              // Check if we got a booking_token in the response
+              const flights = nextFlightsData.flights || [];
+              if (flights.length > 0 && flights[0].booking_token) {
+                finalBookingToken = flights[0].booking_token;
+                console.log(`✅ Resolved next_token to booking_token: ${finalBookingToken.substring(0, 20)}...`);
+              } else if (flights.length > 0 && flights[0].next_token) {
+                console.warn(`⚠️ getNextFlights returned another next_token (multi-city?). May need another call.`);
+                // For now, try using it anyway
+                finalBookingToken = flights[0].next_token;
+              } else {
+                console.warn(`⚠️ getNextFlights did not return booking_token`);
+                finalBookingToken = null;
+              }
+            } catch (error) {
+              console.warn(`⚠️ getNextFlights failed: ${error.message}`);
+              finalBookingToken = null;
+            }
+          }
 
           // STRATEGY 1: Try RapidAPI getBookingURL first (direct booking page)
-          if (selectedFlight.bookingToken) {
+          if (finalBookingToken) {
             try {
               console.log(`🎫 Attempting to get booking URL via RapidAPI token...`);
-              const bookingData = await googleFlightsService.getBookingURL(selectedFlight.bookingToken);
+              const bookingData = await googleFlightsService.getBookingURL(finalBookingToken);
 
               // Check if we got a valid booking page URL (not just a search URL)
               if (bookingData.bookingUrl && bookingData.bookingUrl.includes('/booking?tfs=')) {

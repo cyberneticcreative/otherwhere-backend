@@ -9,7 +9,7 @@
 
 ### 1. Booking URL Returns Multi-Results Instead of Direct Booking Page
 
-**Status:** PARTIALLY WORKING - Hybrid strategy implemented but still has issues
+**Status:** ✅ ROOT CAUSE IDENTIFIED - Missing getNextFlights implementation
 
 **Current Behavior:**
 - The system uses a hybrid two-tier strategy:
@@ -18,6 +18,42 @@
 
 **The Problem:**
 Users are still getting multi-result search pages instead of the direct booking page for their selected flight.
+
+**✅ ROOT CAUSE (Confirmed from production logs):**
+
+From actual flight search logs (YYZ → MEX round-trip):
+```
+[GoogleFlights] Sample flight keys: [
+  'departure_time', 'arrival_time', 'duration', 'flights',
+  'delay', 'self_transfer', 'layovers', 'bags',
+  'carbon_emissions', 'price', 'stops', 'airline_logo',
+  'next_token'  ← ONLY THIS, NO booking_token!
+]
+
+[GoogleFlights] Using booking token from field: next_token
+
+[GoogleFlights] Booking API response: {
+  "status": false,
+  "message": "Invalid token"  ← next_token cannot be used with getBookingURL!
+}
+```
+
+**The Issue:** For **round-trip and multi-city flights**, the initial search returns `next_token` instead of `booking_token`. Per RapidAPI docs:
+
+> If booking_token is not present, you will need to call the Get Next Flights endpoint (api/v1/getNextFlights). Continue this process until you reach the last flight, at which point the booking_token will be provided.
+>
+> - For a **round-trip flight**: call getNextFlights **once**
+> - For **multi-city flights**: call getNextFlights **multiple times** until you get booking_token
+
+**Current Flow (BROKEN):**
+```
+searchFlights() → flight has next_token → try getBookingURL(next_token) → "Invalid token" → fallback
+```
+
+**Correct Flow (NEEDS IMPLEMENTATION):**
+```
+searchFlights() → flight has next_token → getNextFlights(next_token) → get booking_token → getBookingURL(booking_token) → success!
+```
 
 **Root Causes Identified:**
 
