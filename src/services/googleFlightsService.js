@@ -25,6 +25,30 @@ class GoogleFlightsService {
       'x-rapidapi-host': RAPIDAPI_HOST,
       'x-rapidapi-key': RAPIDAPI_KEY
     };
+
+    // In-memory cache for airport searches (airports don't change often)
+    this.airportCache = new Map();
+    this.CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
+
+    // Rate limiting
+    this.lastRequestTime = 0;
+    this.MIN_REQUEST_INTERVAL = 500; // 500ms between requests
+  }
+
+  /**
+   * Add delay between requests to avoid rate limiting
+   */
+  async rateLimitDelay() {
+    const now = Date.now();
+    const timeSinceLastRequest = now - this.lastRequestTime;
+
+    if (timeSinceLastRequest < this.MIN_REQUEST_INTERVAL) {
+      const delay = this.MIN_REQUEST_INTERVAL - timeSinceLastRequest;
+      console.log(`[GoogleFlights] Rate limit delay: ${delay}ms`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+
+    this.lastRequestTime = Date.now();
   }
 
   /**
@@ -41,8 +65,20 @@ class GoogleFlightsService {
       throw new Error('Google Flights API not configured - missing RAPIDAPI_KEY');
     }
 
+    // Check cache first
+    const cacheKey = `${query.toLowerCase()}_${countryCode}`;
+    const cached = this.airportCache.get(cacheKey);
+
+    if (cached && (Date.now() - cached.timestamp < this.CACHE_TTL)) {
+      console.log(`[GoogleFlights] Using cached airports for: ${query}`);
+      return cached.data;
+    }
+
     try {
       console.log(`[GoogleFlights] Searching airports for: ${query}`);
+
+      // Add rate limiting delay
+      await this.rateLimitDelay();
 
       const response = await axios.get(`${BASE_URL}/searchAirport`, {
         params: {
@@ -58,13 +94,21 @@ class GoogleFlightsService {
 
       console.log(`[GoogleFlights] Found ${airports.length} airports for "${query}"`);
 
-      return airports.map(airport => ({
+      const formattedAirports = airports.map(airport => ({
         code: airport.airport_id || airport.code,
         name: airport.airport_name || airport.name,
         city: airport.city || airport.city_name,
         country: airport.country || airport.country_name,
         displayName: `${airport.airport_name || airport.name} (${airport.airport_id || airport.code})`
       }));
+
+      // Cache the result
+      this.airportCache.set(cacheKey, {
+        data: formattedAirports,
+        timestamp: Date.now()
+      });
+
+      return formattedAirports;
 
     } catch (error) {
       console.error(`[GoogleFlights] Airport search error:`, error.message);
@@ -131,6 +175,9 @@ class GoogleFlightsService {
 
     try {
       console.log(`[GoogleFlights] Searching flights: ${departureId} → ${arrivalId}${outboundDate ? ` on ${outboundDate}` : ''}`);
+
+      // Add rate limiting delay
+      await this.rateLimitDelay();
 
       const searchParams = {
         departure_id: departureId,

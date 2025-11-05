@@ -44,6 +44,7 @@ app.get('/health', (req, res) => {
 // Twilio webhooks
 app.post('/sms/inbound', smsController.handleInboundSMS);
 app.post('/sms/status', smsController.handleStatusCallback);
+app.post('/webhook/sms/status', smsController.handleStatusCallback); // Alternative path for Twilio
 
 // Voice webhooks  
 app.post('/voice/inbound', voiceController.handleInboundCall);
