@@ -450,20 +450,32 @@ class AirbnbService {
       const id = listing.id || property.id || property.propertyId || property.listingId;
       const name = listing.name || listing.title || listing.publicAddress || property.name || property.title || 'Property';
 
-      // Price can be in pricingQuote.structuredStayDisplayPrice.primaryLine.price or other locations
+      // Price can be in multiple locations - try all possible paths
       const priceString = pricingQuote.structuredStayDisplayPrice?.primaryLine?.price
+        || pricingQuote.structuredStayDisplayPrice?.secondaryLine?.price
         || pricingQuote.rate?.amount
+        || pricingQuote.price?.amount
         || property.price?.rate
+        || property.price?.amount
         || property.price
         || property.pricePerNight
-        || 0;
+        || listing.price?.rate
+        || listing.price?.amount
+        || listing.price
+        || null; // Use null instead of 0 to distinguish "no price data" from "$0"
 
       // Extract numeric price from string like "$123" or "123"
-      const pricePerNight = typeof priceString === 'string'
-        ? parseFloat(priceString.replace(/[^0-9.]/g, ''))
-        : priceString;
+      let pricePerNight = null;
+      if (priceString !== null) {
+        if (typeof priceString === 'string') {
+          const numericPrice = parseFloat(priceString.replace(/[^0-9.]/g, ''));
+          pricePerNight = isNaN(numericPrice) ? null : numericPrice;
+        } else if (typeof priceString === 'number') {
+          pricePerNight = priceString;
+        }
+      }
 
-      const currency = pricingQuote.rate?.currency || property.price?.currency || 'USD';
+      const currency = pricingQuote.rate?.currency || property.price?.currency || listing.price?.currency || 'USD';
       const rating = listing.avgRating || listing.rating || property.rating || property.avgRating || 0;
       const reviewCount = listing.reviewsCount || listing.reviews_count || property.reviewsCount || property.reviews_count || property.numberOfReviews || 0;
       const propertyType = listing.roomTypeCategory || listing.type || listing.propertyType || listing.roomType || property.type || property.propertyType || property.roomType || 'Property';
@@ -482,9 +494,17 @@ class AirbnbService {
           topLevel: Object.keys(property),
           listingKeys: listing ? Object.keys(listing).slice(0, 10) : [],
           pricingKeys: pricingQuote ? Object.keys(pricingQuote) : [],
+          hasPricingQuote: !!property.pricingQuote,
+          pricingQuoteStructure: property.pricingQuote ? JSON.stringify(property.pricingQuote, null, 2).substring(0, 300) : 'N/A',
           extractedPrice: pricePerNight,
-          extractedName: name
+          extractedName: name,
+          priceStringFound: priceString
         });
+
+        // If no price found, log the entire property structure for debugging
+        if (pricePerNight === null || pricePerNight === 0) {
+          console.warn(`[Airbnb] ⚠️ No valid price found for property. Full property sample:`, JSON.stringify(property, null, 2).substring(0, 1000));
+        }
       }
 
       return {
@@ -541,8 +561,10 @@ class AirbnbService {
       // Compact property type (remove "Entire" prefix if present)
       const type = property.propertyType.replace(/^Entire\s+/i, '');
 
-      // Price display
-      const price = `$${property.pricePerNight}/nt`;
+      // Price display - handle null prices
+      const price = property.pricePerNight !== null && property.pricePerNight > 0
+        ? `$${property.pricePerNight}/nt`
+        : 'Price TBD';
 
       // Rating display (⭐ emoji + rating)
       const ratingDisplay = property.rating !== 'New'

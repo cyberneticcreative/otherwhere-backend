@@ -391,9 +391,19 @@ class AssistantService {
                 };
 
                 // Return accommodation results to the assistant
-                const resultsMessage = formattedProperties.length > 0
-                  ? `Found ${formattedProperties.length} great places! Best option: $${formattedProperties[0].pricePerNight}/night with ${formattedProperties[0].rating}⭐ rating. Accommodation details are being sent via SMS now.`
-                  : `No accommodations found for these dates. Try different dates or a nearby location.`;
+                let resultsMessage;
+                if (formattedProperties.length > 0) {
+                  const bestProperty = formattedProperties[0];
+                  const hasPricing = bestProperty.pricePerNight !== null && bestProperty.pricePerNight > 0;
+
+                  if (hasPricing) {
+                    resultsMessage = `Found ${formattedProperties.length} great places! Best option: $${bestProperty.pricePerNight}/night with ${bestProperty.rating}⭐ rating. Accommodation details are being sent via SMS now.`;
+                  } else {
+                    resultsMessage = `Found ${formattedProperties.length} properties (pricing varies). ${bestProperty.rating}⭐ rated options available. Details sent via SMS - check Airbnb for current prices.`;
+                  }
+                } else {
+                  resultsMessage = `No accommodations found for these dates. Try different dates or a nearby location.`;
+                }
 
                 toolOutputs.push({
                   tool_call_id: toolCall.id,

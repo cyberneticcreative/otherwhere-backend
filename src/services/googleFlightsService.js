@@ -183,8 +183,8 @@ class GoogleFlightsService {
       return fallbackAirports;
     }
 
-    // Try API with retry logic
-    const maxRetries = 2;
+    // Try API with retry logic - exponential backoff (2s, 4s, 8s, 16s)
+    const maxRetries = 4;
     let lastError;
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -201,7 +201,7 @@ class GoogleFlightsService {
             country_code: countryCode
           },
           headers: this.defaultHeaders,
-          timeout: 30000 // Increased from 20s to 30s
+          timeout: 40000 // Increased from 30s to 40s for better reliability
         });
 
         const rawResults = response.data?.data || [];
@@ -263,15 +263,20 @@ class GoogleFlightsService {
         lastError = error;
         console.error(`[GoogleFlights] Airport search error (attempt ${attempt}/${maxRetries}):`, error.message);
 
+        // Log more details about connection errors
+        if (error.code === 'ECONNRESET' || error.code === 'ETIMEDOUT' || error.code === 'ENOTFOUND') {
+          console.error(`[GoogleFlights] Network error detected: ${error.code} - ${error.message}`);
+        }
+
         // Don't retry on rate limit - fail immediately
         if (error.response?.status === 429) {
           throw new Error('Flight search rate limit exceeded. Please try again in a few minutes.');
         }
 
-        // If not the last attempt, wait a bit before retrying
+        // If not the last attempt, wait with exponential backoff (2s, 4s, 8s, 16s)
         if (attempt < maxRetries) {
-          const retryDelay = 2000; // 2 seconds
-          console.log(`[GoogleFlights] Retrying in ${retryDelay}ms...`);
+          const retryDelay = Math.pow(2, attempt) * 1000; // 2^1=2s, 2^2=4s, 2^3=8s, 2^4=16s
+          console.log(`[GoogleFlights] Retrying in ${retryDelay}ms with exponential backoff...`);
           await new Promise(resolve => setTimeout(resolve, retryDelay));
         }
       }
@@ -334,90 +339,115 @@ class GoogleFlightsService {
       throw new Error('Invalid return date format. Use YYYY-MM-DD');
     }
 
-    try {
-      console.log(`[GoogleFlights] Searching flights: ${departureId} → ${arrivalId}${outboundDate ? ` on ${outboundDate}` : ''}`);
+    // Retry logic with exponential backoff for flight search
+    const maxRetries = 4;
+    let lastError;
 
-      // Add rate limiting delay
-      await this.rateLimitDelay();
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`[GoogleFlights] Searching flights: ${departureId} → ${arrivalId}${outboundDate ? ` on ${outboundDate}` : ''} (attempt ${attempt}/${maxRetries})`);
 
-      const searchParams = {
-        departure_id: departureId,
-        arrival_id: arrivalId,
-        travel_class: travelClass.toUpperCase(),
-        adults,
-        currency,
-        language_code: languageCode,
-        country_code: countryCode,
-        search_type: searchType,
-        show_hidden: 1
-      };
+        // Add rate limiting delay
+        await this.rateLimitDelay();
 
-      // Add optional parameters
-      if (outboundDate) {
-        searchParams.outbound_date = outboundDate;
+        const searchParams = {
+          departure_id: departureId,
+          arrival_id: arrivalId,
+          travel_class: travelClass.toUpperCase(),
+          adults,
+          currency,
+          language_code: languageCode,
+          country_code: countryCode,
+          search_type: searchType,
+          show_hidden: 1
+        };
+
+        // Add optional parameters
+        if (outboundDate) {
+          searchParams.outbound_date = outboundDate;
+        }
+        if (returnDate) {
+          searchParams.return_date = returnDate;
+        }
+        if (children > 0) {
+          searchParams.children = children;
+        }
+        if (infants > 0) {
+          searchParams.infants = infants;
+        }
+
+        // Debug: Log the exact params being sent
+        console.log(`[GoogleFlights] API Request params:`, JSON.stringify(searchParams, null, 2));
+
+        const response = await axios.get(`${BASE_URL}/searchFlights`, {
+          params: searchParams,
+          headers: this.defaultHeaders,
+          timeout: 45000 // Increased from 20s to 45s for better reliability
+        });
+
+        const data = response.data?.data || response.data;
+
+        // Debug: Log response structure
+        console.log(`[GoogleFlights] Response structure:`, {
+          hasData: !!data,
+          hasItineraries: !!data?.itineraries,
+          topLevelKeys: Object.keys(response.data || {}),
+          dataKeys: Object.keys(data || {}),
+          itinerariesKeys: Object.keys(data?.itineraries || {})
+        });
+
+        // Count total flights from both topFlights and otherFlights
+        const topFlightsCount = data?.itineraries?.topFlights?.length || 0;
+        const otherFlightsCount = data?.itineraries?.otherFlights?.length || 0;
+        const totalCount = topFlightsCount + otherFlightsCount;
+
+        console.log(`[GoogleFlights] Found ${totalCount} flights (${topFlightsCount} top, ${otherFlightsCount} other)`);
+
+        // If 0 flights, log more details
+        if (totalCount === 0) {
+          console.log(`[GoogleFlights] ⚠️ 0 flights found. Raw response sample:`, JSON.stringify(response.data, null, 2).substring(0, 500));
+        }
+
+        console.log(`[GoogleFlights] ✅ Successfully retrieved flights on attempt ${attempt}`);
+
+        return {
+          success: true,
+          searchParams: params,
+          results: data,
+          count: totalCount
+        };
+
+      } catch (error) {
+        lastError = error;
+        console.error(`[GoogleFlights] Flight search error (attempt ${attempt}/${maxRetries}):`, error.message);
+
+        // Log more details about connection errors
+        if (error.code === 'ECONNRESET' || error.code === 'ETIMEDOUT' || error.code === 'ENOTFOUND') {
+          console.error(`[GoogleFlights] Network error detected: ${error.code} - ${error.message}`);
+        }
+
+        // Don't retry on rate limit - fail immediately
+        if (error.response?.status === 429) {
+          throw new Error('Flight search rate limit exceeded. Please try again in a few minutes.');
+        }
+
+        // Don't retry on bad request - fail immediately
+        if (error.response?.status === 400) {
+          throw new Error('Invalid flight search parameters. Please check your dates and airport codes.');
+        }
+
+        // If not the last attempt, wait with exponential backoff (2s, 4s, 8s, 16s)
+        if (attempt < maxRetries) {
+          const retryDelay = Math.pow(2, attempt) * 1000; // 2^1=2s, 2^2=4s, 2^3=8s, 2^4=16s
+          console.log(`[GoogleFlights] Retrying in ${retryDelay}ms with exponential backoff...`);
+          await new Promise(resolve => setTimeout(resolve, retryDelay));
+        }
       }
-      if (returnDate) {
-        searchParams.return_date = returnDate;
-      }
-      if (children > 0) {
-        searchParams.children = children;
-      }
-      if (infants > 0) {
-        searchParams.infants = infants;
-      }
-
-      // Debug: Log the exact params being sent
-      console.log(`[GoogleFlights] API Request params:`, JSON.stringify(searchParams, null, 2));
-
-      const response = await axios.get(`${BASE_URL}/searchFlights`, {
-        params: searchParams,
-        headers: this.defaultHeaders,
-        timeout: 20000 // Increased from 15s to 20s
-      });
-
-      const data = response.data?.data || response.data;
-
-      // Debug: Log response structure
-      console.log(`[GoogleFlights] Response structure:`, {
-        hasData: !!data,
-        hasItineraries: !!data?.itineraries,
-        topLevelKeys: Object.keys(response.data || {}),
-        dataKeys: Object.keys(data || {}),
-        itinerariesKeys: Object.keys(data?.itineraries || {})
-      });
-
-      // Count total flights from both topFlights and otherFlights
-      const topFlightsCount = data?.itineraries?.topFlights?.length || 0;
-      const otherFlightsCount = data?.itineraries?.otherFlights?.length || 0;
-      const totalCount = topFlightsCount + otherFlightsCount;
-
-      console.log(`[GoogleFlights] Found ${totalCount} flights (${topFlightsCount} top, ${otherFlightsCount} other)`);
-
-      // If 0 flights, log more details
-      if (totalCount === 0) {
-        console.log(`[GoogleFlights] ⚠️ 0 flights found. Raw response sample:`, JSON.stringify(response.data, null, 2).substring(0, 500));
-      }
-
-      return {
-        success: true,
-        searchParams: params,
-        results: data,
-        count: totalCount
-      };
-
-    } catch (error) {
-      console.error(`[GoogleFlights] Flight search error:`, error.message);
-
-      if (error.response?.status === 429) {
-        throw new Error('Flight search rate limit exceeded. Please try again in a few minutes.');
-      }
-
-      if (error.response?.status === 400) {
-        throw new Error('Invalid flight search parameters. Please check your dates and airport codes.');
-      }
-
-      throw new Error(`Flight search failed: ${error.message}`);
     }
+
+    // All retries failed - throw the last error
+    console.error(`[GoogleFlights] All ${maxRetries} attempts failed for flight search`);
+    throw new Error(`Flight search failed after ${maxRetries} attempts: ${lastError?.message || 'Unknown error'}`);
   }
 
   /**

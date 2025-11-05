@@ -121,6 +121,29 @@ class SMSController {
 
           await twilioService.sendSMS(from, bookingMessage);
 
+          // Clear flight results so numbers don't conflict with accommodation selection
+          await sessionManager.updateSession(from, {
+            lastFlightResults: null
+          });
+
+          // PROACTIVELY ASK ABOUT ACCOMMODATIONS
+          // Check if we have flight search context
+          if (session.lastFlightSearch && session.lastFlightSearch.destination) {
+            console.log('💡 Flight selected - proactively offering accommodations...');
+
+            // Send accommodation offer after a brief delay (2 seconds)
+            setTimeout(async () => {
+              try {
+                const destination = session.lastFlightSearch.destination;
+                const accommodationPrompt = `Great! Want me to find places to stay in ${destination}?`;
+                await twilioService.sendSMS(from, accommodationPrompt);
+                console.log('✅ Accommodation offer sent');
+              } catch (error) {
+                console.error('❌ Failed to send accommodation offer:', error);
+              }
+            }, 2000);
+          }
+
           res.type('text/xml');
           res.send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
 
