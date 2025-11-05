@@ -34,7 +34,7 @@ class AirbnbService {
 
     // Rate limiting - more aggressive than flights due to unofficial API
     this.lastRequestTime = 0;
-    this.MIN_REQUEST_INTERVAL = 1500; // 1.5 seconds between requests
+    this.MIN_REQUEST_INTERVAL = 2500; // 2.5 seconds between requests (increased from 1.5s to avoid 429)
 
     // Common destinations fallback (major cities)
     this.commonDestinations = {
@@ -442,26 +442,49 @@ class AirbnbService {
     const propertiesToFormat = filteredProperties.slice(0, limit);
 
     return propertiesToFormat.map((property, index) => {
-      // Extract property details (handle various possible field names)
-      const id = property.id || property.propertyId || property.listingId;
-      const name = property.name || property.title || property.publicAddress || 'Property';
-      const pricePerNight = property.price?.rate || property.price || property.pricePerNight || 0;
-      const currency = property.price?.currency || 'USD';
-      const rating = property.rating || property.avgRating || 0;
-      const reviewCount = property.reviewsCount || property.reviews_count || property.numberOfReviews || 0;
-      const propertyType = property.type || property.propertyType || property.roomType || 'Property';
-      const beds = property.beds || property.bedrooms || 0;
-      const baths = property.bathrooms || property.baths || 0;
-      const maxGuests = property.maxGuests || property.personCapacity || 0;
-      const images = property.images || property.photos || [];
-      const mainImage = images[0]?.url || images[0] || '';
+      // Handle nested API response structure (listing, pricingQuote, listingParamOverrides)
+      const listing = property.listing || property;
+      const pricingQuote = property.pricingQuote || {};
+
+      // Extract property details (handle nested and flat structures)
+      const id = listing.id || property.id || property.propertyId || property.listingId;
+      const name = listing.name || listing.title || listing.publicAddress || property.name || property.title || 'Property';
+
+      // Price can be in pricingQuote.structuredStayDisplayPrice.primaryLine.price or other locations
+      const priceString = pricingQuote.structuredStayDisplayPrice?.primaryLine?.price
+        || pricingQuote.rate?.amount
+        || property.price?.rate
+        || property.price
+        || property.pricePerNight
+        || 0;
+
+      // Extract numeric price from string like "$123" or "123"
+      const pricePerNight = typeof priceString === 'string'
+        ? parseFloat(priceString.replace(/[^0-9.]/g, ''))
+        : priceString;
+
+      const currency = pricingQuote.rate?.currency || property.price?.currency || 'USD';
+      const rating = listing.avgRating || listing.rating || property.rating || property.avgRating || 0;
+      const reviewCount = listing.reviewsCount || listing.reviews_count || property.reviewsCount || property.reviews_count || property.numberOfReviews || 0;
+      const propertyType = listing.roomTypeCategory || listing.type || listing.propertyType || listing.roomType || property.type || property.propertyType || property.roomType || 'Property';
+      const beds = listing.beds || listing.bedrooms || property.beds || property.bedrooms || 0;
+      const baths = listing.bathrooms || listing.baths || property.bathrooms || property.baths || 0;
+      const maxGuests = listing.maxGuests || listing.personCapacity || property.maxGuests || property.personCapacity || 0;
+      const images = listing.contextualPictures || listing.images || listing.photos || property.images || property.photos || [];
+      const mainImage = images[0]?.picture || images[0]?.url || images[0] || '';
 
       // Generate Airbnb URL
       const airbnbUrl = id ? `https://www.airbnb.com/rooms/${id}` : '';
 
       // Debug: log available fields for first property
       if (index === 0) {
-        console.log(`[Airbnb] Sample property keys:`, Object.keys(property));
+        console.log(`[Airbnb] Sample property structure:`, {
+          topLevel: Object.keys(property),
+          listingKeys: listing ? Object.keys(listing).slice(0, 10) : [],
+          pricingKeys: pricingQuote ? Object.keys(pricingQuote) : [],
+          extractedPrice: pricePerNight,
+          extractedName: name
+        });
       }
 
       return {
