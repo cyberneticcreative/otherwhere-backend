@@ -158,6 +158,20 @@ class WebhookController {
         const correctedCheckIn = fixPastDate(check_in);
         const correctedCheckOut = fixPastDate(check_out);
 
+        // Check if dates are too far in the future (warn but don't block)
+        let dateWarning = '';
+        if (correctedCheckIn) {
+          const checkInDate = new Date(correctedCheckIn);
+          const now = new Date();
+          const tenMonthsFromNow = new Date(now.getFullYear(), now.getMonth() + 10, now.getDate());
+
+          if (checkInDate > tenMonthsFromNow) {
+            const monthsAway = Math.round((checkInDate - now) / (1000 * 60 * 60 * 24 * 30));
+            dateWarning = `Note: Your travel date is ${monthsAway} months away. Flight availability may be limited for dates that far in advance. `;
+            console.log(`⚠️ Date warning: Search is ${monthsAway} months in the future`);
+          }
+        }
+
         // Build trip details object
         const tripDetails = {
           destination,
@@ -265,8 +279,8 @@ class WebhookController {
           // Step 7: Return success response to ElevenLabs
           res.json({
             result: phoneNumber
-              ? `Great! I found ${formattedFlights.length} flights from ${origin} to ${destination}. I've texted you the details with prices and times. Reply with a number to get the booking link!`
-              : `I found ${formattedFlights.length} flights from ${origin} to ${destination}. The best option is $${formattedFlights[0].price} on ${formattedFlights[0].airline}.`,
+              ? `${dateWarning}Great! I found ${formattedFlights.length} flights from ${origin} to ${destination}. I've texted you the details with prices and times. Reply with a number to get the booking link!`
+              : `${dateWarning}I found ${formattedFlights.length} flights from ${origin} to ${destination}. The best option is $${formattedFlights[0].price} on ${formattedFlights[0].airline}.`,
             success: true
           });
 

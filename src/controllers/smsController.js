@@ -37,33 +37,15 @@ class SMSController {
         const selectedFlight = session.lastFlightResults[selectedIndex];
 
         if (selectedFlight) {
-          console.log(`✈️ User selected flight #${flightSelection[1]}, fetching booking URL...`);
+          console.log(`✈️ User selected flight #${flightSelection[1]}, generating booking URL...`);
 
           let bookingUrl = null;
 
-          // Try to get booking URL using token
-          if (selectedFlight.bookingToken) {
-            try {
-              const googleFlightsService = require('../services/googleFlightsService');
-              const bookingData = await googleFlightsService.getBookingURL(selectedFlight.bookingToken);
-              bookingUrl = bookingData.bookingUrl;
-            } catch (error) {
-              console.error('❌ Error getting booking URL from token:', error.message);
-            }
-          }
-
-          // Fallback: construct manual Google Flights search URL if token failed
-          if (!bookingUrl && session.lastFlightSearch) {
+          // Always use Google Flights search URL (token API is unreliable)
+          if (session.lastFlightSearch) {
             const { origin, destination, startDate, endDate } = session.lastFlightSearch;
             if (origin && destination && startDate) {
-              // Construct dynamic Google Flights search URL
-              const params = new URLSearchParams({
-                tfs: 'CBwQAho',
-                hl: 'en',
-                curr: 'USD'
-              });
-
-              // Build URL with origin, destination, and dates
+              // Construct Google Flights search URL
               bookingUrl = `https://www.google.com/travel/flights/search?` +
                 `q=Flights%20from%20${origin}%20to%20${destination}%20on%20${startDate}`;
 
@@ -71,7 +53,7 @@ class SMSController {
                 bookingUrl += `%20returning%20${endDate}`;
               }
 
-              console.log(`🔗 Using fallback Google Flights search URL: ${origin} → ${destination} on ${startDate}`);
+              console.log(`🔗 Generated Google Flights URL: ${origin} → ${destination} on ${startDate}`);
             }
           }
 

@@ -162,6 +162,20 @@ class AssistantService {
               const correctedCheckIn = fixPastDate(args.check_in);
               const correctedCheckOut = fixPastDate(args.check_out);
 
+              // Check if dates are too far in the future (warn but don't block)
+              let dateWarning = '';
+              if (correctedCheckIn) {
+                const checkInDate = new Date(correctedCheckIn);
+                const now = new Date();
+                const tenMonthsFromNow = new Date(now.getFullYear(), now.getMonth() + 10, now.getDate());
+
+                if (checkInDate > tenMonthsFromNow) {
+                  const monthsAway = Math.round((checkInDate - now) / (1000 * 60 * 60 * 24 * 30));
+                  dateWarning = `Note: Your travel date is ${monthsAway} months away. Flight availability may be limited for dates that far in advance. `;
+                  console.log(`⚠️ Date warning: Search is ${monthsAway} months in the future`);
+                }
+              }
+
               // Store trip search data
               tripSearchData = {
                 destination: args.destination,
@@ -237,8 +251,8 @@ class AssistantService {
 
                 // Return flight results to the assistant
                 const resultsMessage = formattedFlights.length > 0
-                  ? `Found ${formattedFlights.length} flights! Best price: $${formattedFlights[0].price} on ${formattedFlights[0].airline}. Flight details are being sent via SMS now.`
-                  : 'No flights found for these dates. Try different dates.';
+                  ? `${dateWarning}Found ${formattedFlights.length} flights! Best price: $${formattedFlights[0].price} on ${formattedFlights[0].airline}. Flight details are being sent via SMS now.`
+                  : `${dateWarning}No flights found for these dates. Try different dates or closer to your travel time.`;
 
                 toolOutputs.push({
                   tool_call_id: toolCall.id,
