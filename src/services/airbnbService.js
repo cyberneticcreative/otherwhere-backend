@@ -57,7 +57,7 @@ class AirbnbService {
 
     // Minimum quality filters
     this.MIN_RATING = 4.0;
-    this.MIN_REVIEW_COUNT = 3;
+    this.MIN_REVIEW_COUNT = 0; // Allow new listings (changed from 3)
   }
 
   /**
@@ -407,7 +407,7 @@ class AirbnbService {
       }
 
       // Filter by rating
-      const rating = property.rating || property.avgRating || property.reviewsCount || 0;
+      const rating = property.rating || property.avgRating || 0;
       if (rating < minRating && rating > 0) { // Only filter if rating exists
         return false;
       }
