@@ -43,11 +43,17 @@ class SMSController {
 
           let bookingUrl = null;
 
-          // Always use Google Flights search URL (token API is unreliable)
-          if (session.lastFlightSearch) {
+          // Use booking token if available (preferred method)
+          if (selectedFlight.bookingToken) {
+            // Use Google Flights booking URL with token (tfu parameter)
+            bookingUrl = `https://www.google.com/travel/flights/booking?tfu=${encodeURIComponent(selectedFlight.bookingToken)}`;
+            console.log(`🔗 Generated Google Flights booking URL using token`);
+          }
+          // Fallback: Use search URL if no token available
+          else if (session.lastFlightSearch) {
             const { origin, destination, startDate, endDate } = session.lastFlightSearch;
             if (origin && destination && startDate) {
-              // Construct Google Flights search URL
+              // Construct Google Flights search URL as fallback
               bookingUrl = `https://www.google.com/travel/flights/search?` +
                 `q=Flights%20from%20${origin}%20to%20${destination}%20on%20${startDate}`;
 
@@ -55,7 +61,7 @@ class SMSController {
                 bookingUrl += `%20returning%20${endDate}`;
               }
 
-              console.log(`🔗 Generated Google Flights URL: ${origin} → ${destination} on ${startDate}`);
+              console.log(`🔗 Generated Google Flights search URL (no token): ${origin} → ${destination} on ${startDate}`);
             }
           }
 

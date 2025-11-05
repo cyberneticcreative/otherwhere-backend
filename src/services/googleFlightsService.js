@@ -665,32 +665,60 @@ class GoogleFlightsService {
     }
 
     const { departureId, arrivalId, outboundDate, currency } = searchInfo;
-    const currencyLabel = currency || 'USD';
-    const header = `✈️ Flights ${departureId} → ${arrivalId} (${outboundDate})\nPrices in ${currencyLabel}\n\n`;
+
+    // Compact date format (MM/DD)
+    const formatDate = (dateStr) => {
+      if (!dateStr) return '';
+      const parts = dateStr.split('-');
+      if (parts.length === 3) {
+        return `${parts[1]}/${parts[2]}`; // Returns "02/14"
+      }
+      return dateStr;
+    };
+
+    const dateDisplay = formatDate(outboundDate);
+    const header = `✈️ ${departureId}→${arrivalId} ${dateDisplay}\n`;
 
     const flightsList = formattedFlights.map(flight => {
-      // Parse time from format "26-11-2025 08:53 PM" to just "8:53 AM"
-      const parseTime = (timeStr) => {
+      // Parse and compact time: "26-11-2025 08:53 PM" → "8:53p"
+      const compactTime = (timeStr) => {
         if (!timeStr) return '';
         const parts = timeStr.split(' ');
         if (parts.length >= 3) {
-          return `${parts[1]} ${parts[2]}`; // Returns "08:53 PM"
+          let time = parts[1]; // "08:53"
+          const ampm = parts[2].toLowerCase()[0]; // "p" or "a"
+
+          // Remove leading zero and shorten format
+          const [hours, mins] = time.split(':');
+          const h = hours.startsWith('0') ? hours.substring(1) : hours;
+          return `${h}:${mins}${ampm}`;
         }
         return timeStr;
       };
 
-      const departTime = parseTime(flight.departure);
-      const arriveTime = parseTime(flight.arrival);
+      // Compact duration: "13 hr 40 min" → "13h40m"
+      const compactDuration = (durationStr) => {
+        if (!durationStr) return '';
+        return durationStr
+          .replace(/ hr /g, 'h')
+          .replace(/ min/g, 'm')
+          .replace(/ /g, '');
+      };
+
+      const departTime = compactTime(flight.departure);
+      const arriveTime = compactTime(flight.arrival);
+      const duration = compactDuration(flight.duration);
 
       // Use displayPrice if available (converted currency), otherwise use price
       const priceDisplay = flight.displayPrice || `$${flight.price}`;
 
-      return `${flight.index}. ${flight.airline}
-${priceDisplay} • ${departTime} - ${arriveTime}
-${flight.duration} • ${flight.stopsText}`;
+      // Compact stops text
+      const stops = flight.stops === 0 ? 'Direct' : `${flight.stops} stop${flight.stops > 1 ? 's' : ''}`;
+
+      return `${flight.index}. ${flight.airline} ${priceDisplay}\n${departTime}-${arriveTime} ${duration} ${stops}`;
     }).join('\n\n');
 
-    return header + flightsList + '\n\nReply with JUST the number (1, 2, or 3) to get your booking link.';
+    return `${header}${flightsList}\n\nReply 1-${formattedFlights.length} for booking link`;
   }
 
   /**
