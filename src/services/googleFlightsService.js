@@ -33,6 +33,38 @@ class GoogleFlightsService {
     // Rate limiting
     this.lastRequestTime = 0;
     this.MIN_REQUEST_INTERVAL = 1000; // 1 second between requests (increased from 500ms)
+
+    // Common airport codes fallback (in case API is slow/down)
+    this.commonAirports = {
+      // North America
+      'toronto': [{ code: 'YYZ', name: 'Toronto Pearson International Airport', city: 'Toronto', country: 'Canada' }],
+      'vancouver': [{ code: 'YVR', name: 'Vancouver International Airport', city: 'Vancouver', country: 'Canada' }],
+      'montreal': [{ code: 'YUL', name: 'Montreal-Pierre Elliott Trudeau International Airport', city: 'Montreal', country: 'Canada' }],
+      'new york': [{ code: 'JFK', name: 'John F. Kennedy International Airport', city: 'New York', country: 'USA' }, { code: 'EWR', name: 'Newark Liberty International Airport', city: 'Newark', country: 'USA' }],
+      'los angeles': [{ code: 'LAX', name: 'Los Angeles International Airport', city: 'Los Angeles', country: 'USA' }],
+      'chicago': [{ code: 'ORD', name: "O'Hare International Airport", city: 'Chicago', country: 'USA' }],
+      'san francisco': [{ code: 'SFO', name: 'San Francisco International Airport', city: 'San Francisco', country: 'USA' }],
+      'miami': [{ code: 'MIA', name: 'Miami International Airport', city: 'Miami', country: 'USA' }],
+      'seattle': [{ code: 'SEA', name: 'Seattle-Tacoma International Airport', city: 'Seattle', country: 'USA' }],
+      'boston': [{ code: 'BOS', name: 'Logan International Airport', city: 'Boston', country: 'USA' }],
+
+      // Europe
+      'london': [{ code: 'LHR', name: 'London Heathrow Airport', city: 'London', country: 'UK' }, { code: 'LGW', name: 'London Gatwick Airport', city: 'London', country: 'UK' }],
+      'paris': [{ code: 'CDG', name: 'Charles de Gaulle Airport', city: 'Paris', country: 'France' }],
+      'madrid': [{ code: 'MAD', name: 'Adolfo Suárez Madrid–Barajas Airport', city: 'Madrid', country: 'Spain' }],
+      'barcelona': [{ code: 'BCN', name: 'Barcelona-El Prat Airport', city: 'Barcelona', country: 'Spain' }],
+      'rome': [{ code: 'FCO', name: 'Leonardo da Vinci–Fiumicino Airport', city: 'Rome', country: 'Italy' }],
+      'amsterdam': [{ code: 'AMS', name: 'Amsterdam Airport Schiphol', city: 'Amsterdam', country: 'Netherlands' }],
+      'frankfurt': [{ code: 'FRA', name: 'Frankfurt Airport', city: 'Frankfurt', country: 'Germany' }],
+      'dublin': [{ code: 'DUB', name: 'Dublin Airport', city: 'Dublin', country: 'Ireland' }],
+
+      // Asia & Oceania
+      'tokyo': [{ code: 'NRT', name: 'Narita International Airport', city: 'Tokyo', country: 'Japan' }, { code: 'HND', name: 'Haneda Airport', city: 'Tokyo', country: 'Japan' }],
+      'singapore': [{ code: 'SIN', name: 'Singapore Changi Airport', city: 'Singapore', country: 'Singapore' }],
+      'sydney': [{ code: 'SYD', name: 'Sydney Kingsford Smith Airport', city: 'Sydney', country: 'Australia' }],
+      'dubai': [{ code: 'DXB', name: 'Dubai International Airport', city: 'Dubai', country: 'UAE' }],
+      'bangkok': [{ code: 'BKK', name: 'Suvarnabhumi Airport', city: 'Bangkok', country: 'Thailand' }],
+    };
   }
 
   /**
@@ -79,85 +111,116 @@ class GoogleFlightsService {
       return cached.data;
     }
 
-    try {
-      console.log(`[GoogleFlights] Searching airports for: ${cleanQuery}${cleanQuery !== query ? ` (cleaned from "${query}")` : ''}`);
-
-      // Add rate limiting delay
-      await this.rateLimitDelay();
-
-      const response = await axios.get(`${BASE_URL}/searchAirport`, {
-        params: {
-          query: cleanQuery,
-          language_code: languageCode,
-          country_code: countryCode
-        },
-        headers: this.defaultHeaders,
-        timeout: 20000 // Increased from 10s to 20s
-      });
-
-      const rawResults = response.data?.data || [];
-
-      console.log(`[GoogleFlights] Found ${rawResults.length} results for "${query}"`);
-
-      // Debug: Log first result structure if available
-      if (rawResults.length > 0) {
-        console.log(`[GoogleFlights] Sample result data:`, JSON.stringify(rawResults[0], null, 2));
-      }
-
-      // Flatten the results - extract airports from nested 'list' arrays
-      let airports = [];
-
-      for (const result of rawResults) {
-        // If this result has a 'list' property with airports, extract them
-        if (result.list && Array.isArray(result.list)) {
-          const airportsInList = result.list.filter(item => item.type === 'airport');
-          airports.push(...airportsInList);
-        }
-        // Otherwise, if this is a direct airport result, use it
-        else if (result.type === 'airport') {
-          airports.push(result);
-        }
-      }
-
-      console.log(`[GoogleFlights] Extracted ${airports.length} airports from results`);
-
-      const formattedAirports = airports.map(airport => {
-        // For the nested structure, 'id' is the airport code
-        const code = airport.id || airport.airport_id || airport.code || airport.iata_code || airport.iata;
-        const name = airport.title || airport.airport_name || airport.name || airport.display_name;
-
-        if (!code) {
-          console.warn(`[GoogleFlights] Warning: Airport missing code field:`, airport);
-        }
-
-        return {
-          code,
-          name,
-          city: airport.city || airport.city_name,
-          country: airport.country || airport.country_name,
-          subtitle: airport.subtitle,
-          distance: airport.distance,
-          displayName: `${name} (${code || 'N/A'})`
-        };
-      });
-
-      // Cache the result
+    // Check hardcoded fallback first
+    const fallbackKey = cleanQuery.toLowerCase();
+    const fallbackAirports = this.commonAirports[fallbackKey];
+    if (fallbackAirports) {
+      console.log(`[GoogleFlights] Using fallback airports for: ${cleanQuery}`);
+      // Cache the fallback too
       this.airportCache.set(cacheKey, {
-        data: formattedAirports,
+        data: fallbackAirports,
         timestamp: Date.now()
       });
-
-      return formattedAirports;
-
-    } catch (error) {
-      console.error(`[GoogleFlights] Airport search error:`, error.message);
-
-      if (error.response?.status === 429) {
-        throw new Error('Flight search rate limit exceeded. Please try again in a few minutes.');
-      }
-
-      throw new Error(`Airport search failed: ${error.message}`);
+      return fallbackAirports;
     }
+
+    // Try API with retry logic
+    const maxRetries = 2;
+    let lastError;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`[GoogleFlights] Searching airports for: ${cleanQuery}${cleanQuery !== query ? ` (cleaned from "${query}")` : ''} (attempt ${attempt}/${maxRetries})`);
+
+        // Add rate limiting delay
+        await this.rateLimitDelay();
+
+        const response = await axios.get(`${BASE_URL}/searchAirport`, {
+          params: {
+            query: cleanQuery,
+            language_code: languageCode,
+            country_code: countryCode
+          },
+          headers: this.defaultHeaders,
+          timeout: 30000 // Increased from 20s to 30s
+        });
+
+        const rawResults = response.data?.data || [];
+
+        console.log(`[GoogleFlights] Found ${rawResults.length} results for "${query}"`);
+
+        // Debug: Log first result structure if available
+        if (rawResults.length > 0) {
+          console.log(`[GoogleFlights] Sample result data:`, JSON.stringify(rawResults[0], null, 2));
+        }
+
+        // Flatten the results - extract airports from nested 'list' arrays
+        let airports = [];
+
+        for (const result of rawResults) {
+          // If this result has a 'list' property with airports, extract them
+          if (result.list && Array.isArray(result.list)) {
+            const airportsInList = result.list.filter(item => item.type === 'airport');
+            airports.push(...airportsInList);
+          }
+          // Otherwise, if this is a direct airport result, use it
+          else if (result.type === 'airport') {
+            airports.push(result);
+          }
+        }
+
+        console.log(`[GoogleFlights] Extracted ${airports.length} airports from results`);
+
+        const formattedAirports = airports.map(airport => {
+          // For the nested structure, 'id' is the airport code
+          const code = airport.id || airport.airport_id || airport.code || airport.iata_code || airport.iata;
+          const name = airport.title || airport.airport_name || airport.name || airport.display_name;
+
+          if (!code) {
+            console.warn(`[GoogleFlights] Warning: Airport missing code field:`, airport);
+          }
+
+          return {
+            code,
+            name,
+            city: airport.city || airport.city_name,
+            country: airport.country || airport.country_name,
+            subtitle: airport.subtitle,
+            distance: airport.distance,
+            displayName: `${name} (${code || 'N/A'})`
+          };
+        });
+
+        // Cache the result
+        this.airportCache.set(cacheKey, {
+          data: formattedAirports,
+          timestamp: Date.now()
+        });
+
+        console.log(`[GoogleFlights] ✅ Successfully retrieved airports on attempt ${attempt}`);
+        return formattedAirports;
+
+      } catch (error) {
+        lastError = error;
+        console.error(`[GoogleFlights] Airport search error (attempt ${attempt}/${maxRetries}):`, error.message);
+
+        // Don't retry on rate limit - fail immediately
+        if (error.response?.status === 429) {
+          throw new Error('Flight search rate limit exceeded. Please try again in a few minutes.');
+        }
+
+        // If not the last attempt, wait a bit before retrying
+        if (attempt < maxRetries) {
+          const retryDelay = 2000; // 2 seconds
+          console.log(`[GoogleFlights] Retrying in ${retryDelay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, retryDelay));
+        }
+      }
+    }
+
+    // All retries failed - throw the last error
+    console.error(`[GoogleFlights] All ${maxRetries} attempts failed for airport search: ${cleanQuery}`);
+    throw new Error(`Airport search failed after ${maxRetries} attempts: ${lastError?.message || 'Unknown error'}`);
   }
 
   /**
