@@ -458,6 +458,7 @@ class GoogleFlightsService {
 
       // Debug: log the actual response structure
       console.log(`[GoogleFlights] Booking details response keys:`, Object.keys(response.data || {}));
+      console.log(`[GoogleFlights] Full booking details response:`, JSON.stringify(response.data, null, 2).substring(0, 1000));
 
       const data = response.data?.data || response.data;
       const bookingOptions = data?.booking_options || data?.bookingOptions || [];
