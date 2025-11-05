@@ -140,11 +140,12 @@ class WebhookController {
           // Search flights using Google Flights API
           console.log(`[GoogleFlights] Searching: ${origin} → ${destination} on ${check_in}`);
 
-          // Step 1: Resolve airport codes
-          const [originAirports, destAirports] = await Promise.all([
-            googleFlightsService.searchAirport(origin),
-            googleFlightsService.searchAirport(destination)
-          ]);
+          // Step 1: Resolve airport codes (sequential to avoid rate limits)
+          console.log(`🔍 Searching origin airport: ${origin}`);
+          const originAirports = await googleFlightsService.searchAirport(origin);
+
+          console.log(`🔍 Searching destination airport: ${destination}`);
+          const destAirports = await googleFlightsService.searchAirport(destination);
 
           if (!originAirports || originAirports.length === 0) {
             throw new Error(`Could not find airport for: ${origin}`);

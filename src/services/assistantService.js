@@ -142,11 +142,12 @@ class AssistantService {
                 const flightSearchStart = Date.now();
                 console.log('🛫 Calling Google Flights API...');
 
-                // Step 1: Resolve airport codes
-                const [originAirports, destAirports] = await Promise.all([
-                  googleFlightsService.searchAirport(tripSearchData.origin),
-                  googleFlightsService.searchAirport(tripSearchData.destination)
-                ]);
+                // Step 1: Resolve airport codes (sequential to avoid rate limits)
+                console.log(`🔍 Searching origin airport: ${tripSearchData.origin}`);
+                const originAirports = await googleFlightsService.searchAirport(tripSearchData.origin);
+
+                console.log(`🔍 Searching destination airport: ${tripSearchData.destination}`);
+                const destAirports = await googleFlightsService.searchAirport(tripSearchData.destination);
 
                 if (!originAirports || originAirports.length === 0) {
                   throw new Error(`Could not find airport for: ${tripSearchData.origin}`);

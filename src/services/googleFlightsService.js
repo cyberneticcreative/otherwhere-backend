@@ -32,7 +32,7 @@ class GoogleFlightsService {
 
     // Rate limiting
     this.lastRequestTime = 0;
-    this.MIN_REQUEST_INTERVAL = 500; // 500ms between requests
+    this.MIN_REQUEST_INTERVAL = 1000; // 1 second between requests (increased from 500ms)
   }
 
   /**
@@ -87,7 +87,7 @@ class GoogleFlightsService {
           country_code: countryCode
         },
         headers: this.defaultHeaders,
-        timeout: 10000
+        timeout: 20000 // Increased from 10s to 20s
       });
 
       const rawResults = response.data?.data || [];
@@ -242,7 +242,7 @@ class GoogleFlightsService {
       const response = await axios.get(`${BASE_URL}/searchFlights`, {
         params: searchParams,
         headers: this.defaultHeaders,
-        timeout: 15000
+        timeout: 20000 // Increased from 15s to 20s
       });
 
       const data = response.data?.data || response.data;
