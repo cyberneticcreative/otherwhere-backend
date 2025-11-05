@@ -453,6 +453,19 @@ class GoogleFlightsService {
       // Debug: log the actual response
       console.log(`[GoogleFlights] Booking API response:`, JSON.stringify(response.data, null, 2));
 
+      // Check for error responses
+      if (response.data?.status === false || response.data?.message === 'Invalid token') {
+        console.warn(`[GoogleFlights] ❌ API rejected token: ${response.data?.message || 'Unknown error'}`);
+        console.warn(`[GoogleFlights] Token used: ${token.substring(0, 50)}...`);
+        // Return null so caller can use fallback
+        return {
+          success: false,
+          bookingUrl: null,
+          error: response.data?.message || 'Invalid token',
+          data: response.data
+        };
+      }
+
       // Try multiple possible field names for the booking URL
       const bookingUrl = response.data?.url
         || response.data?.booking_url
@@ -618,17 +631,30 @@ class GoogleFlightsService {
       const stopsText = stops === 0 ? 'Direct' : `${stops} stop${stops > 1 ? 's' : ''}`;
 
       // Try multiple possible token fields for booking
+      // Prioritize actual booking tokens over pagination tokens
       const bookingToken = flight.token
         || flight.booking_token
         || flight.purchase_token
-        || flight.next_token
+        || flight.token_id
+        || flight.book_token
         || flight.id
+        || flight.next_token  // Last resort - might be pagination token
         || '';
 
       // Debug: log available fields for first flight
       if (index === 0) {
         console.log(`[GoogleFlights] Sample flight keys:`, Object.keys(flight));
         console.log(`[GoogleFlights] Using booking token from field: ${bookingToken ? Object.keys(flight).find(k => flight[k] === bookingToken) : 'NONE'}`);
+
+        // Log a sample of the token to help debug
+        if (bookingToken) {
+          console.log(`[GoogleFlights] Token sample: ${bookingToken.substring(0, 50)}... (length: ${bookingToken.length})`);
+        }
+
+        // If we're using next_token, warn that it might be a pagination token
+        if (bookingToken === flight.next_token && !flight.token && !flight.booking_token) {
+          console.warn(`[GoogleFlights] ⚠️ Using 'next_token' as booking token - this may be a pagination token and could fail`);
+        }
       }
 
       return {

@@ -1,5 +1,6 @@
 const OpenAI = require('openai');
 const googleFlightsService = require('./googleFlightsService');
+const airbnbService = require('./airbnbService');
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
@@ -28,6 +29,7 @@ class AssistantService {
    * @param {string} threadId - Thread ID for the conversation
    * @param {string} userMessage - User's message
    * @param {Object} options - Additional options
+   * @param {Object} options.sessionContext - Session context (lastFlightSearch, lastAccommodationSearch, etc.)
    * @returns {Promise<Object>} Response object with text and metadata
    */
   async sendMessage(threadId, userMessage, options = {}) {
@@ -36,13 +38,31 @@ class AssistantService {
     }
 
     try {
-      // Add user message to thread
+      // Build context message if we have session context
+      let contextMessage = '';
+      if (options.sessionContext) {
+        const { lastFlightSearch, lastAccommodationSearch } = options.sessionContext;
+
+        if (lastFlightSearch && lastFlightSearch.startDate) {
+          contextMessage += `\n\n[CONTEXT: User just searched for flights from ${lastFlightSearch.origin} to ${lastFlightSearch.destination} for ${lastFlightSearch.startDate}`;
+          if (lastFlightSearch.endDate) {
+            contextMessage += ` to ${lastFlightSearch.endDate}`;
+          }
+          contextMessage += `. If they're asking about accommodations, use these same dates unless they specify different ones.]`;
+        }
+
+        if (lastAccommodationSearch && lastAccommodationSearch.checkIn) {
+          contextMessage += `\n\n[CONTEXT: User previously searched accommodations for ${lastAccommodationSearch.checkIn} to ${lastAccommodationSearch.checkOut}]`;
+        }
+      }
+
+      // Add user message to thread (with context if available)
       await openai.beta.threads.messages.create(threadId, {
         role: 'user',
-        content: userMessage
+        content: userMessage + contextMessage
       });
 
-      console.log(`💬 Added message to thread ${threadId}`);
+      console.log(`💬 Added message to thread ${threadId}${contextMessage ? ' (with context)' : ''}`);
 
       // Create a run
       const run = await openai.beta.threads.runs.create(threadId, {
@@ -52,7 +72,7 @@ class AssistantService {
       console.log(`🏃 Started run ${run.id}`);
 
       // Poll for completion and handle function calls
-      const { run: completedRun, tripSearchData, flightResults } = await this.waitForRunCompletion(threadId, run.id);
+      const { run: completedRun, tripSearchData, flightResults, accommodationResults } = await this.waitForRunCompletion(threadId, run.id);
 
       // Get the assistant's response
       const messages = await openai.beta.threads.messages.list(threadId, {
@@ -77,7 +97,8 @@ class AssistantService {
       return {
         text: textContent || 'Let me help you with that...',
         tripSearch: tripSearchData, // This comes from function calling
-        flightResults: flightResults, // This contains actual flight data from TravelPayouts
+        flightResults: flightResults, // This contains actual flight data from Google Flights
+        accommodationResults: accommodationResults, // This contains actual accommodation data from Airbnb
         threadId: threadId,
         runId: completedRun.id
       };
@@ -98,6 +119,7 @@ class AssistantService {
   async waitForRunCompletion(threadId, runId, maxAttempts = 60) {
     let tripSearchData = null;
     let flightResults = null;
+    let accommodationResults = null;
     const pollStartTime = Date.now();
 
     for (let i = 0; i < maxAttempts; i++) {
@@ -106,7 +128,7 @@ class AssistantService {
       if (run.status === 'completed') {
         const pollDuration = Date.now() - pollStartTime;
         console.log(`⏱️  Assistant polling completed in ${pollDuration}ms after ${i + 1} attempts`);
-        return { run, tripSearchData, flightResults };
+        return { run, tripSearchData, flightResults, accommodationResults };
       }
 
       if (run.status === 'requires_action') {
@@ -277,6 +299,125 @@ class AssistantService {
                   output: JSON.stringify({
                     success: false,
                     message: 'Unable to search flights at the moment. Please try again or check city names.'
+                  })
+                });
+              }
+            } else if (toolCall.function.name === 'search_accommodations') {
+              // Extract the function arguments
+              const args = JSON.parse(toolCall.function.arguments);
+              console.log(`🔍 search_accommodations called with:`, args);
+
+              // Fix dates if they're in the past (smart correction)
+              const fixPastDate = (dateStr) => {
+                if (!dateStr) return null;
+
+                const inputDate = new Date(dateStr);
+                const now = new Date();
+
+                if (inputDate > now) {
+                  return dateStr;
+                }
+
+                const month = inputDate.getMonth();
+                const day = inputDate.getDate();
+                const currentYear = now.getFullYear();
+
+                const currentYearDate = new Date(currentYear, month, day);
+
+                if (currentYearDate > now) {
+                  const correctedDate = `${currentYear}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                  console.log(`📅 Corrected past date: ${dateStr} → ${correctedDate} (this year)`);
+                  return correctedDate;
+                } else {
+                  const nextYear = currentYear + 1;
+                  const correctedDate = `${nextYear}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                  console.log(`📅 Corrected past date: ${dateStr} → ${correctedDate} (next year)`);
+                  return correctedDate;
+                }
+              };
+
+              const correctedCheckIn = fixPastDate(args.check_in || args.checkIn);
+              const correctedCheckOut = fixPastDate(args.check_out || args.checkOut);
+
+              // ACTUALLY SEARCH FOR ACCOMMODATIONS using Airbnb API
+              try {
+                const accommodationSearchStart = Date.now();
+                console.log('🏠 Calling Airbnb API...');
+
+                // Step 1: Resolve destination ID
+                console.log(`🔍 Searching destination: ${args.destination}`);
+                const destinations = await airbnbService.searchDestination(args.destination, 'USA');
+
+                if (!destinations || destinations.length === 0) {
+                  throw new Error(`Could not find destination: ${args.destination}`);
+                }
+
+                const destinationId = destinations[0]?.id;
+                const destinationName = destinations[0]?.name || args.destination;
+
+                if (!destinationId) {
+                  console.error(`[Airbnb] Destination missing ID:`, destinations[0]);
+                  throw new Error(`Could not resolve destination ID for: ${args.destination}`);
+                }
+
+                console.log(`[Airbnb] Resolved destination: ${destinationName} (${destinationId})`);
+
+                // Step 2: Search properties
+                const searchParams = {
+                  destinationId: destinationId,
+                  checkIn: correctedCheckIn,
+                  checkOut: correctedCheckOut,
+                  adults: parseInt(args.guests) || 1,
+                  maxPrice: args.budget_per_night_usd || args.budgetPerNight || undefined,
+                  currency: 'USD',
+                  limit: 10
+                };
+
+                const searchResults = await airbnbService.searchProperties(searchParams);
+
+                // Step 3: Format results
+                const formattedProperties = airbnbService.formatPropertyResults(searchResults, 3, {
+                  privateOnly: true,
+                  minRating: 4.0,
+                  minReviews: 3
+                });
+
+                // Store formatted results for SMS sending later
+                accommodationResults = {
+                  properties: formattedProperties,
+                  destinationId,
+                  destinationName,
+                  searchParams
+                };
+
+                // Return accommodation results to the assistant
+                const resultsMessage = formattedProperties.length > 0
+                  ? `Found ${formattedProperties.length} great places! Best option: $${formattedProperties[0].pricePerNight}/night with ${formattedProperties[0].rating}⭐ rating. Accommodation details are being sent via SMS now.`
+                  : `No accommodations found for these dates. Try different dates or a nearby location.`;
+
+                toolOutputs.push({
+                  tool_call_id: toolCall.id,
+                  output: JSON.stringify({
+                    success: true,
+                    message: resultsMessage,
+                    propertyCount: formattedProperties.length,
+                    bestPrice: formattedProperties[0]?.pricePerNight || null,
+                    bestRating: formattedProperties[0]?.rating || null
+                  })
+                });
+
+                const accommodationSearchDuration = Date.now() - accommodationSearchStart;
+                console.log(`✅ Accommodation search completed: ${formattedProperties.length} results in ${accommodationSearchDuration}ms`);
+
+              } catch (error) {
+                console.error('❌ Airbnb API error:', error.message);
+
+                // Return error to assistant
+                toolOutputs.push({
+                  tool_call_id: toolCall.id,
+                  output: JSON.stringify({
+                    success: false,
+                    message: 'Unable to search accommodations at the moment. Please try again or check location name.'
                   })
                 });
               }

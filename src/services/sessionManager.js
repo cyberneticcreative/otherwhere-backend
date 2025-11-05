@@ -59,6 +59,15 @@ class SessionManager {
       tripDetails: null,
       channel: null, // 'sms' or 'voice'
       threadId: null, // OpenAI Assistant thread ID
+      // Flight-related session data
+      lastFlightResults: null, // Array of formatted flight results
+      lastFlightSearch: null, // Last flight search parameters
+      // Accommodation-related session data
+      lastAccommodationResults: null, // Array of formatted accommodation results
+      lastAccommodationSearch: null, // Last accommodation search parameters
+      // Search flow tracking
+      searchType: null, // 'flights' | 'accommodations' | 'both'
+      flightsCompleted: false, // For "both" flow sequencing
       createdAt: new Date().toISOString(),
       lastActivity: new Date().toISOString()
     };

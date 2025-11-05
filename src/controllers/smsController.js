@@ -3,6 +3,7 @@ const llmService = require('../services/llmService');
 const assistantService = require('../services/assistantService');
 const sessionManager = require('../services/sessionManager');
 const googleFlightsService = require('../services/googleFlightsService');
+const airbnbService = require('../services/airbnbService');
 
 class SMSController {
   /**
@@ -25,22 +26,42 @@ class SMSController {
       // Re-fetch session to get latest data (in case it was updated by flight results)
       session = await sessionManager.getSession(from);
 
-      // Debug: Log session state
-      console.log(`🔍 Session check - lastFlightResults exists: ${!!session.lastFlightResults}, count: ${session.lastFlightResults?.length || 0}`);
+      // Check for reset/start over command
+      const resetTriggers = ['reset', 'start over', 'restart', 'new search'];
+      const isResetCommand = resetTriggers.some(trigger =>
+        body.toLowerCase().includes(trigger)
+      );
 
-      // Check if user is selecting a flight number (1, 2, or 3)
+      if (isResetCommand) {
+        console.log(`🔄 User requested reset`);
+        await sessionManager.clearSession(from);
+        await twilioService.sendSMS(
+          from,
+          "Sure! Let's start fresh. Where would you like to go?"
+        );
+
+        res.type('text/xml');
+        res.send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+        return;
+      }
+
+      // Debug: Log session state
+      console.log(`🔍 Session check - lastFlightResults: ${!!session.lastFlightResults}, lastAccommodationResults: ${!!session.lastAccommodationResults}`);
+
+      // Check if user is selecting a number (1, 2, or 3) for flight or accommodation
       // Only match if the ENTIRE message is exactly "1", "2", or "3"
       // This prevents "Jan 3-18" or "December 1" from triggering
       const isShortMessage = body.trim().length < 15;
-      const flightSelection = isShortMessage ? body.trim().match(/^([123])$/) : null;
-      console.log(`🔍 Flight selection check - matched: ${!!flightSelection}, short: ${isShortMessage}, body: "${body}"`);
+      const numberSelection = isShortMessage ? body.trim().match(/^([123])$/) : null;
+      console.log(`🔍 Number selection check - matched: ${!!numberSelection}, short: ${isShortMessage}, body: "${body}"`);
 
-      if (flightSelection && session.lastFlightResults) {
-        const selectedIndex = parseInt(flightSelection[1]) - 1;
+      // Prioritize flight selection if both exist (flights searched first in "both" flow)
+      if (numberSelection && session.lastFlightResults) {
+        const selectedIndex = parseInt(numberSelection[1]) - 1;
         const selectedFlight = session.lastFlightResults[selectedIndex];
 
         if (selectedFlight) {
-          console.log(`✈️ User selected flight #${flightSelection[1]}, generating booking URL...`);
+          console.log(`✈️ User selected flight #${numberSelection[1]}, generating booking URL...`);
 
           let bookingUrl = null;
           let urlType = 'none'; // Track which method was used for logging
@@ -107,6 +128,42 @@ class SMSController {
           console.log(`⏱️  TOTAL request time: ${totalDuration}ms (${(totalDuration/1000).toFixed(1)}s)`);
           return;
         }
+      } else if (numberSelection && session.lastAccommodationResults) {
+        // Handle accommodation selection
+        const selectedIndex = parseInt(numberSelection[1]) - 1;
+        const selectedProperty = session.lastAccommodationResults[selectedIndex];
+
+        if (selectedProperty) {
+          console.log(`🏠 User selected accommodation #${numberSelection[1]}, generating booking URL...`);
+
+          // Generate Airbnb URL
+          const bookingUrl = selectedProperty.url;
+
+          // Calculate total cost if dates available
+          let costInfo = '';
+          if (session.lastAccommodationSearch?.checkIn && session.lastAccommodationSearch?.checkOut) {
+            const costBreakdown = airbnbService.calculateTotalCost(
+              selectedProperty.pricePerNight,
+              session.lastAccommodationSearch.checkIn,
+              session.lastAccommodationSearch.checkOut
+            );
+
+            costInfo = `\n${costBreakdown.nights} nights = $${costBreakdown.subtotal}\n${costBreakdown.feesNote}`;
+          }
+
+          const bookingMessage = bookingUrl
+            ? `Great choice! 🏠\n\n${selectedProperty.name}\n$${selectedProperty.pricePerNight}/night ⭐${selectedProperty.rating}${costInfo}\n\n🔗 Book here: ${bookingUrl}`
+            : `Great choice! 🏠\n\n${selectedProperty.name}\n$${selectedProperty.pricePerNight}/night ⭐${selectedProperty.rating}${costInfo}\n\nPlease search on Airbnb for this property.`;
+
+          await twilioService.sendSMS(from, bookingMessage);
+
+          res.type('text/xml');
+          res.send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+
+          const totalDuration = Date.now() - startTime;
+          console.log(`⏱️  TOTAL request time: ${totalDuration}ms (${(totalDuration/1000).toFixed(1)}s)`);
+          return;
+        }
       }
 
       // Add user message to conversation history
@@ -121,6 +178,7 @@ class SMSController {
       let responseText;
       let tripSearchData = null;
       let flightResults = null;
+      let accommodationResults = null;
 
       const aiStartTime = Date.now();
       console.log(`🤖 Using ${useAssistant ? 'OpenAI Assistant' : 'Direct LLM'}`);
@@ -135,15 +193,22 @@ class SMSController {
             session.threadId = threadId;
           }
 
-          // Send message to assistant
+          // Send message to assistant with session context
           const assistantResponse = await assistantService.sendMessage(
             session.threadId,
-            body
+            body,
+            {
+              sessionContext: {
+                lastFlightSearch: session.lastFlightSearch,
+                lastAccommodationSearch: session.lastAccommodationSearch
+              }
+            }
           );
 
           responseText = assistantResponse.text;
           tripSearchData = assistantResponse.tripSearch;
           flightResults = assistantResponse.flightResults;
+          accommodationResults = assistantResponse.accommodationResults;
 
           const aiDuration = Date.now() - aiStartTime;
           console.log(`⏱️  Assistant took ${aiDuration}ms (${(aiDuration/1000).toFixed(1)}s)`);
@@ -228,6 +293,45 @@ class SMSController {
             console.error('❌ Failed to send flight results SMS:', smsError);
           }
         }, 2000); // 2 second delay
+      }
+
+      // If we have accommodation results, send them as a separate SMS
+      if (accommodationResults && accommodationResults.properties && accommodationResults.properties.length > 0) {
+        console.log('🏠 Sending accommodation results as separate SMS...');
+
+        // Store accommodation results and search details in session so user can select one later
+        await sessionManager.updateSession(from, {
+          lastAccommodationResults: accommodationResults.properties,
+          lastAccommodationSearch: {
+            destination: accommodationResults.destinationName,
+            checkIn: accommodationResults.searchParams?.checkIn,
+            checkOut: accommodationResults.searchParams?.checkOut
+          }
+        });
+        console.log(`💾 Stored ${accommodationResults.properties.length} properties in session for ${from}`);
+
+        // Use Airbnb service for formatting
+        const airbnbService = require('../services/airbnbService');
+        const accommodationMessage = airbnbService.formatSMSMessage(
+          accommodationResults.properties,
+          {
+            destinationName: accommodationResults.destinationName,
+            checkIn: accommodationResults.searchParams?.checkIn,
+            checkOut: accommodationResults.searchParams?.checkOut
+          }
+        );
+
+        // Send accommodation details as a second SMS (after a brief delay for better UX)
+        // Delay more if we also sent flight results
+        const delay = flightResults ? 4000 : 2000;
+        setTimeout(async () => {
+          try {
+            await twilioService.sendLongSMS(from, accommodationMessage);
+            console.log('✅ Accommodation results SMS sent');
+          } catch (smsError) {
+            console.error('❌ Failed to send accommodation results SMS:', smsError);
+          }
+        }, delay);
       }
 
       // Send TwiML response to Twilio
