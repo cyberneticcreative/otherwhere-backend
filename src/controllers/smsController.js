@@ -260,6 +260,7 @@ class SMSController {
         );
 
         // Store flight results and search details in session so user can select one later
+        // Clear accommodation results to prevent number selection conflict
         await sessionManager.updateSession(from, {
           lastFlightResults: convertedFlights,
           lastFlightSearch: {
@@ -267,7 +268,8 @@ class SMSController {
             destination: flightResults.destCode,
             startDate: flightResults.searchParams?.outboundDate,
             endDate: flightResults.searchParams?.returnDate
-          }
+          },
+          lastAccommodationResults: null // Clear accommodation results when showing flights
         });
         console.log(`💾 Stored ${convertedFlights.length} flights in session for ${from}`);
         console.log(`💾 Flight tokens:`, convertedFlights.map((f, i) => `${i+1}: ${f.bookingToken ? 'has token' : 'NO TOKEN'}`));
@@ -300,13 +302,15 @@ class SMSController {
         console.log('🏠 Sending accommodation results as separate SMS...');
 
         // Store accommodation results and search details in session so user can select one later
+        // Clear flight results to prevent number selection conflict
         await sessionManager.updateSession(from, {
           lastAccommodationResults: accommodationResults.properties,
           lastAccommodationSearch: {
             destination: accommodationResults.destinationName,
             checkIn: accommodationResults.searchParams?.checkIn,
             checkOut: accommodationResults.searchParams?.checkOut
-          }
+          },
+          lastFlightResults: null // Clear flight results when showing accommodations
         });
         console.log(`💾 Stored ${accommodationResults.properties.length} properties in session for ${from}`);
 
