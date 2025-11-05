@@ -120,25 +120,39 @@ class WebhookController {
 
         console.log(`🛫 Processing search_trips for ${destination}`);
 
-        // Fix dates if they're in the past
+        // Fix dates if they're in the past (smart correction)
         const fixPastDate = (dateStr) => {
           if (!dateStr) return null;
 
-          const date = new Date(dateStr);
+          const inputDate = new Date(dateStr);
           const now = new Date();
 
-          // If the date is in the past, move it to next year
-          if (date < now) {
-            const currentYear = now.getFullYear();
-            const nextYear = currentYear + 1;
-
-            // Replace the year in the date string
-            const correctedDate = dateStr.replace(/^\d{4}/, nextYear.toString());
-            console.log(`📅 Corrected past date: ${dateStr} → ${correctedDate}`);
-            return correctedDate;
+          // If date is in the future, use it as-is
+          if (inputDate > now) {
+            return dateStr;
           }
 
-          return dateStr;
+          // Date is in the past - need to correct it
+          // Extract month and day from the input date
+          const month = inputDate.getMonth(); // 0-11
+          const day = inputDate.getDate();
+          const currentYear = now.getFullYear();
+
+          // Try current year first
+          const currentYearDate = new Date(currentYear, month, day);
+
+          if (currentYearDate > now) {
+            // The date hasn't happened yet this year - use current year
+            const correctedDate = `${currentYear}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+            console.log(`📅 Corrected past date: ${dateStr} → ${correctedDate} (this year)`);
+            return correctedDate;
+          } else {
+            // The date already passed this year - use next year
+            const nextYear = currentYear + 1;
+            const correctedDate = `${nextYear}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+            console.log(`📅 Corrected past date: ${dateStr} → ${correctedDate} (next year)`);
+            return correctedDate;
+          }
         };
 
         const correctedCheckIn = fixPastDate(check_in);
