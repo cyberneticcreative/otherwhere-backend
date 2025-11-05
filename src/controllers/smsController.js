@@ -18,11 +18,19 @@ class SMSController {
       console.log(`⏱️  Request start: ${new Date().toISOString()}`);
 
       // Get or create session
-      const session = await sessionManager.getSession(from);
+      let session = await sessionManager.getSession(from);
       await sessionManager.updateSession(from, { channel: 'sms' });
+
+      // Re-fetch session to get latest data (in case it was updated by flight results)
+      session = await sessionManager.getSession(from);
+
+      // Debug: Log session state
+      console.log(`🔍 Session check - lastFlightResults exists: ${!!session.lastFlightResults}, count: ${session.lastFlightResults?.length || 0}`);
 
       // Check if user is selecting a flight number (1, 2, or 3)
       const flightSelection = body.trim().match(/^([123])$/);
+      console.log(`🔍 Flight selection check - matched: ${!!flightSelection}, body: "${body}"`);
+
       if (flightSelection && session.lastFlightResults) {
         const selectedIndex = parseInt(flightSelection[1]) - 1;
         const selectedFlight = session.lastFlightResults[selectedIndex];
@@ -156,7 +164,8 @@ class SMSController {
             endDate: flightResults.searchParams?.returnDate
           }
         });
-        console.log(`💾 Stored ${flightResults.flights.length} flights in session`);
+        console.log(`💾 Stored ${flightResults.flights.length} flights in session for ${from}`);
+        console.log(`💾 Flight tokens:`, flightResults.flights.map((f, i) => `${i+1}: ${f.bookingToken ? 'has token' : 'NO TOKEN'}`));
 
         // Use Google Flights service for formatting
         const googleFlightsService = require('../services/googleFlightsService');
