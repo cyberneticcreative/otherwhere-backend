@@ -366,6 +366,9 @@ class GoogleFlightsService {
         searchParams.infants = infants;
       }
 
+      // Debug: Log the exact params being sent
+      console.log(`[GoogleFlights] API Request params:`, JSON.stringify(searchParams, null, 2));
+
       const response = await axios.get(`${BASE_URL}/searchFlights`, {
         params: searchParams,
         headers: this.defaultHeaders,
@@ -374,12 +377,26 @@ class GoogleFlightsService {
 
       const data = response.data?.data || response.data;
 
+      // Debug: Log response structure
+      console.log(`[GoogleFlights] Response structure:`, {
+        hasData: !!data,
+        hasItineraries: !!data?.itineraries,
+        topLevelKeys: Object.keys(response.data || {}),
+        dataKeys: Object.keys(data || {}),
+        itinerariesKeys: Object.keys(data?.itineraries || {})
+      });
+
       // Count total flights from both topFlights and otherFlights
       const topFlightsCount = data?.itineraries?.topFlights?.length || 0;
       const otherFlightsCount = data?.itineraries?.otherFlights?.length || 0;
       const totalCount = topFlightsCount + otherFlightsCount;
 
       console.log(`[GoogleFlights] Found ${totalCount} flights (${topFlightsCount} top, ${otherFlightsCount} other)`);
+
+      // If 0 flights, log more details
+      if (totalCount === 0) {
+        console.log(`[GoogleFlights] ⚠️ 0 flights found. Raw response sample:`, JSON.stringify(response.data, null, 2).substring(0, 500));
+      }
 
       return {
         success: true,
