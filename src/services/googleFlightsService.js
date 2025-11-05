@@ -90,19 +90,36 @@ class GoogleFlightsService {
         timeout: 10000
       });
 
-      const airports = response.data?.data || [];
+      const rawResults = response.data?.data || [];
 
-      console.log(`[GoogleFlights] Found ${airports.length} airports for "${query}"`);
+      console.log(`[GoogleFlights] Found ${rawResults.length} results for "${query}"`);
 
-      // Debug: Log first airport structure if available
-      if (airports.length > 0) {
-        console.log(`[GoogleFlights] Sample airport data:`, JSON.stringify(airports[0], null, 2));
+      // Debug: Log first result structure if available
+      if (rawResults.length > 0) {
+        console.log(`[GoogleFlights] Sample result data:`, JSON.stringify(rawResults[0], null, 2));
       }
 
+      // Flatten the results - extract airports from nested 'list' arrays
+      let airports = [];
+
+      for (const result of rawResults) {
+        // If this result has a 'list' property with airports, extract them
+        if (result.list && Array.isArray(result.list)) {
+          const airportsInList = result.list.filter(item => item.type === 'airport');
+          airports.push(...airportsInList);
+        }
+        // Otherwise, if this is a direct airport result, use it
+        else if (result.type === 'airport') {
+          airports.push(result);
+        }
+      }
+
+      console.log(`[GoogleFlights] Extracted ${airports.length} airports from results`);
+
       const formattedAirports = airports.map(airport => {
-        // Try multiple possible field names for the airport code
-        const code = airport.airport_id || airport.code || airport.id || airport.iata_code || airport.iata;
-        const name = airport.airport_name || airport.name || airport.display_name;
+        // For the nested structure, 'id' is the airport code
+        const code = airport.id || airport.airport_id || airport.code || airport.iata_code || airport.iata;
+        const name = airport.title || airport.airport_name || airport.name || airport.display_name;
 
         if (!code) {
           console.warn(`[GoogleFlights] Warning: Airport missing code field:`, airport);
@@ -113,6 +130,8 @@ class GoogleFlightsService {
           name,
           city: airport.city || airport.city_name,
           country: airport.country || airport.country_name,
+          subtitle: airport.subtitle,
+          distance: airport.distance,
           displayName: `${name} (${code || 'N/A'})`
         };
       });
