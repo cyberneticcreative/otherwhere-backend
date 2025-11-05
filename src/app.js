@@ -93,8 +93,25 @@ app.post('/api/flights/search', async (req, res) => {
     }
 
     // Use the first airport found (typically the main one)
-    const originCode = originAirports[0].code;
-    const destCode = destAirports[0].code;
+    const originCode = originAirports[0]?.code;
+    const destCode = destAirports[0]?.code;
+
+    // Validate that we actually got valid airport codes
+    if (!originCode) {
+      console.error(`[API] Origin airport missing code:`, originAirports[0]);
+      return res.status(400).json({
+        success: false,
+        error: `Could not resolve airport code for origin: ${origin}`
+      });
+    }
+
+    if (!destCode) {
+      console.error(`[API] Destination airport missing code:`, destAirports[0]);
+      return res.status(400).json({
+        success: false,
+        error: `Could not resolve airport code for destination: ${destination}`
+      });
+    }
 
     console.log(`[API] Resolved airports: ${originCode} → ${destCode}`);
 

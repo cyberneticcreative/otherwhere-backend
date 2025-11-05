@@ -156,8 +156,19 @@ class AssistantService {
                   throw new Error(`Could not find airport for: ${tripSearchData.destination}`);
                 }
 
-                const originCode = originAirports[0].code;
-                const destCode = destAirports[0].code;
+                const originCode = originAirports[0]?.code;
+                const destCode = destAirports[0]?.code;
+
+                // Validate that we actually got valid airport codes
+                if (!originCode) {
+                  console.error(`[GoogleFlights] Origin airport missing code:`, originAirports[0]);
+                  throw new Error(`Could not resolve airport code for: ${tripSearchData.origin}`);
+                }
+
+                if (!destCode) {
+                  console.error(`[GoogleFlights] Destination airport missing code:`, destAirports[0]);
+                  throw new Error(`Could not resolve airport code for: ${tripSearchData.destination}`);
+                }
 
                 console.log(`[GoogleFlights] Resolved: ${originCode} → ${destCode}`);
 

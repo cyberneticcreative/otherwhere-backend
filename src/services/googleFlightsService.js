@@ -94,13 +94,28 @@ class GoogleFlightsService {
 
       console.log(`[GoogleFlights] Found ${airports.length} airports for "${query}"`);
 
-      const formattedAirports = airports.map(airport => ({
-        code: airport.airport_id || airport.code,
-        name: airport.airport_name || airport.name,
-        city: airport.city || airport.city_name,
-        country: airport.country || airport.country_name,
-        displayName: `${airport.airport_name || airport.name} (${airport.airport_id || airport.code})`
-      }));
+      // Debug: Log first airport structure if available
+      if (airports.length > 0) {
+        console.log(`[GoogleFlights] Sample airport data:`, JSON.stringify(airports[0], null, 2));
+      }
+
+      const formattedAirports = airports.map(airport => {
+        // Try multiple possible field names for the airport code
+        const code = airport.airport_id || airport.code || airport.id || airport.iata_code || airport.iata;
+        const name = airport.airport_name || airport.name || airport.display_name;
+
+        if (!code) {
+          console.warn(`[GoogleFlights] Warning: Airport missing code field:`, airport);
+        }
+
+        return {
+          code,
+          name,
+          city: airport.city || airport.city_name,
+          country: airport.country || airport.country_name,
+          displayName: `${name} (${code || 'N/A'})`
+        };
+      });
 
       // Cache the result
       this.airportCache.set(cacheKey, {
