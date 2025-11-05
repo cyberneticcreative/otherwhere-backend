@@ -393,7 +393,42 @@ class GoogleFlightsService {
 
       console.log(`[GoogleFlights] Found ${totalCount} flights (${topFlightsCount} top, ${otherFlightsCount} other)`);
 
-      // If 0 flights, log more details
+      // If 0 flights, try with different country codes for international routes
+      if (totalCount === 0 && countryCode === 'US') {
+        console.log(`[GoogleFlights] ⚠️ 0 flights found with US country code. Trying with CA (Canada) for international routes...`);
+
+        try {
+          await this.rateLimitDelay();
+
+          const retryParams = { ...searchParams, country_code: 'CA' };
+          const retryResponse = await axios.get(`${BASE_URL}/searchFlights`, {
+            params: retryParams,
+            headers: this.defaultHeaders,
+            timeout: 20000
+          });
+
+          const retryData = retryResponse.data?.data || retryResponse.data;
+          const retryTopCount = retryData?.itineraries?.topFlights?.length || 0;
+          const retryOtherCount = retryData?.itineraries?.otherFlights?.length || 0;
+          const retryTotal = retryTopCount + retryOtherCount;
+
+          if (retryTotal > 0) {
+            console.log(`[GoogleFlights] ✅ Found ${retryTotal} flights with CA country code!`);
+            return {
+              success: true,
+              searchParams: params,
+              results: retryData,
+              count: retryTotal
+            };
+          } else {
+            console.log(`[GoogleFlights] Still 0 flights with CA country code.`);
+          }
+        } catch (retryError) {
+          console.log(`[GoogleFlights] Retry with CA country code failed: ${retryError.message}`);
+        }
+      }
+
+      // If still 0 flights, log details
       if (totalCount === 0) {
         console.log(`[GoogleFlights] ⚠️ 0 flights found. Raw response sample:`, JSON.stringify(response.data, null, 2).substring(0, 500));
       }

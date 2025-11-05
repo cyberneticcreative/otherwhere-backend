@@ -2,6 +2,7 @@ const twilioService = require('../services/twilioService');
 const llmService = require('../services/llmService');
 const assistantService = require('../services/assistantService');
 const sessionManager = require('../services/sessionManager');
+const googleFlightsService = require('../services/googleFlightsService');
 
 class SMSController {
   /**
@@ -42,9 +43,28 @@ class SMSController {
           console.log(`✈️ User selected flight #${flightSelection[1]}, generating booking URL...`);
 
           let bookingUrl = null;
+          let usedTokenAPI = false;
 
-          // Always use Google Flights search URL (token API is unreliable)
-          if (session.lastFlightSearch) {
+          // Try to use the token API first if we have a booking token
+          if (selectedFlight.bookingToken) {
+            try {
+              console.log(`🔑 Attempting to get booking URL using token API...`);
+              const bookingResult = await googleFlightsService.getBookingURL(selectedFlight.bookingToken);
+
+              if (bookingResult.success && bookingResult.bookingUrl) {
+                bookingUrl = bookingResult.bookingUrl;
+                usedTokenAPI = true;
+                console.log(`✅ Got booking URL from token API`);
+              } else {
+                console.log(`⚠️ Token API returned no URL, falling back to search URL`);
+              }
+            } catch (error) {
+              console.log(`⚠️ Token API failed (${error.message}), falling back to search URL`);
+            }
+          }
+
+          // Fall back to Google Flights search URL if token API didn't work
+          if (!bookingUrl && session.lastFlightSearch) {
             const { origin, destination, startDate, endDate } = session.lastFlightSearch;
             if (origin && destination && startDate) {
               // Construct Google Flights search URL
@@ -55,7 +75,7 @@ class SMSController {
                 bookingUrl += `%20returning%20${endDate}`;
               }
 
-              console.log(`🔗 Generated Google Flights URL: ${origin} → ${destination} on ${startDate}`);
+              console.log(`🔗 Generated fallback Google Flights URL: ${origin} → ${destination} on ${startDate}`);
             }
           }
 

@@ -250,9 +250,17 @@ class AssistantService {
                 };
 
                 // Return flight results to the assistant
-                const resultsMessage = formattedFlights.length > 0
-                  ? `${dateWarning}Found ${formattedFlights.length} flights! Best price: $${formattedFlights[0].price} on ${formattedFlights[0].airline}. Flight details are being sent via SMS now.`
-                  : `${dateWarning}No flights found for these dates. Try different dates or closer to your travel time.`;
+                let resultsMessage;
+                if (formattedFlights.length > 0) {
+                  resultsMessage = `${dateWarning}Found ${formattedFlights.length} flights! Best price: $${formattedFlights[0].price} on ${formattedFlights[0].airline}. Flight details are being sent via SMS now.`;
+                } else {
+                  // Generate a helpful Google Flights URL when no flights found
+                  const fallbackUrl = `https://www.google.com/travel/flights/search?` +
+                    `q=Flights%20from%20${originCode}%20to%20${destCode}%20on%20${tripSearchData.startDate}` +
+                    (tripSearchData.endDate ? `%20returning%20${tripSearchData.endDate}` : '');
+
+                  resultsMessage = `${dateWarning}No flights found in our search. The API may have limited data for this route. You can try searching directly: ${fallbackUrl}`;
+                }
 
                 toolOutputs.push({
                   tool_call_id: toolCall.id,
