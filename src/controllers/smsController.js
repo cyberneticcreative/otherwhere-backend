@@ -28,9 +28,11 @@ class SMSController {
       console.log(`🔍 Session check - lastFlightResults exists: ${!!session.lastFlightResults}, count: ${session.lastFlightResults?.length || 0}`);
 
       // Check if user is selecting a flight number (1, 2, or 3)
-      // Match "1", "2", "3" anywhere in the message (standalone digit)
-      const flightSelection = body.trim().match(/\b([123])\b/);
-      console.log(`🔍 Flight selection check - matched: ${!!flightSelection}, body: "${body}"`);
+      // Only match if message is short (<15 chars) to avoid matching dates/counts
+      // This prevents "December 1" or "1 person" from triggering
+      const isShortMessage = body.trim().length < 15;
+      const flightSelection = isShortMessage ? body.trim().match(/\b([123])\b/) : null;
+      console.log(`🔍 Flight selection check - matched: ${!!flightSelection}, short: ${isShortMessage}, body: "${body}"`);
 
       if (flightSelection && session.lastFlightResults) {
         const selectedIndex = parseInt(flightSelection[1]) - 1;
