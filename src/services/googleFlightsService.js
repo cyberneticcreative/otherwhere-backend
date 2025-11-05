@@ -526,7 +526,7 @@ class GoogleFlightsService {
     }
 
     const { departureId, arrivalId, outboundDate } = searchInfo;
-    const header = `✈️ Flights ${departureId} → ${arrivalId} (${outboundDate})\n\n`;
+    const header = `✈️ Flights ${departureId} → ${arrivalId} (${outboundDate})\nPrices in USD\n\n`;
 
     const flightsList = formattedFlights.map(flight => {
       // Parse time from format "26-11-2025 08:53 PM" to just "8:53 AM"

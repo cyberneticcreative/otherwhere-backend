@@ -237,7 +237,7 @@ class AssistantService {
 
                 // Return flight results to the assistant
                 const resultsMessage = formattedFlights.length > 0
-                  ? `Found ${formattedFlights.length} flights! Best price: $${formattedFlights[0].price} on ${formattedFlights[0].airline}`
+                  ? `Found ${formattedFlights.length} flights! Best price: $${formattedFlights[0].price} on ${formattedFlights[0].airline}. Flight details are being sent via SMS now.`
                   : 'No flights found for these dates. Try different dates.';
 
                 toolOutputs.push({
