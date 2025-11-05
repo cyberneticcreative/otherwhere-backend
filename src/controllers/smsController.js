@@ -29,10 +29,10 @@ class SMSController {
       console.log(`🔍 Session check - lastFlightResults exists: ${!!session.lastFlightResults}, count: ${session.lastFlightResults?.length || 0}`);
 
       // Check if user is selecting a flight number (1, 2, or 3)
-      // Only match if message is short (<15 chars) to avoid matching dates/counts
-      // This prevents "December 1" or "1 person" from triggering
+      // Only match if the ENTIRE message is exactly "1", "2", or "3"
+      // This prevents "Jan 3-18" or "December 1" from triggering
       const isShortMessage = body.trim().length < 15;
-      const flightSelection = isShortMessage ? body.trim().match(/\b([123])\b/) : null;
+      const flightSelection = isShortMessage ? body.trim().match(/^([123])$/) : null;
       console.log(`🔍 Flight selection check - matched: ${!!flightSelection}, short: ${isShortMessage}, body: "${body}"`);
 
       if (flightSelection && session.lastFlightResults) {
