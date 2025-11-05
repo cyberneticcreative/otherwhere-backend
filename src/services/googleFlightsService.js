@@ -299,11 +299,17 @@ class GoogleFlightsService {
     try {
       console.log(`[GoogleFlights] Getting booking URL for token: ${token.substring(0, 20)}...`);
 
-      const response = await axios.get(`${BASE_URL}/getBookingURL`, {
-        params: { token },
-        headers: this.defaultHeaders,
-        timeout: 10000
-      });
+      // Use POST method with token in request body (per API docs)
+      const response = await axios.post(`${BASE_URL}/getBookingURL`,
+        { token },  // Token in body
+        {
+          headers: {
+            ...this.defaultHeaders,
+            'Content-Type': 'application/json'
+          },
+          timeout: 10000
+        }
+      );
 
       // Debug: log the actual response
       console.log(`[GoogleFlights] Booking API response:`, JSON.stringify(response.data, null, 2));
