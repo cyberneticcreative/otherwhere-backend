@@ -2,6 +2,7 @@ const twilioService = require('../services/twilioService');
 const llmService = require('../services/llmService');
 const assistantService = require('../services/assistantService');
 const sessionManager = require('../services/sessionManager');
+const googleFlightsService = require('../services/googleFlightsService');
 
 class SMSController {
   /**
@@ -42,9 +43,37 @@ class SMSController {
           console.log(`✈️ User selected flight #${flightSelection[1]}, generating booking URL...`);
 
           let bookingUrl = null;
+          let urlType = 'none'; // Track which method was used for logging
 
-          // Always use Google Flights search URL (token API is unreliable)
-          if (session.lastFlightSearch) {
+          // STRATEGY 1: Try RapidAPI getBookingURL first (direct booking page)
+          if (selectedFlight.bookingToken) {
+            try {
+              console.log(`🎫 Attempting to get booking URL via RapidAPI token...`);
+              const bookingData = await googleFlightsService.getBookingURL(selectedFlight.bookingToken);
+
+              // Check if we got a valid booking page URL (not just a search URL)
+              if (bookingData.bookingUrl && bookingData.bookingUrl.includes('/booking?tfs=')) {
+                bookingUrl = bookingData.bookingUrl;
+                urlType = 'api-booking';
+                console.log(`✅ SUCCESS: Got direct booking page URL from API`);
+                console.log(`🔗 URL type: ${bookingUrl.substring(0, 80)}...`);
+              } else if (bookingData.bookingUrl) {
+                console.warn(`⚠️ API returned URL but not a booking page: ${bookingData.bookingUrl.substring(0, 80)}...`);
+                // Continue to fallback
+              } else {
+                console.warn(`⚠️ API returned no booking URL in response`);
+                // Continue to fallback
+              }
+            } catch (error) {
+              console.warn(`⚠️ Token API failed: ${error.message}`);
+              // Continue to fallback
+            }
+          } else {
+            console.log(`ℹ️ No booking token available for this flight`);
+          }
+
+          // STRATEGY 2: Fallback to Google Flights search URL
+          if (!bookingUrl && session.lastFlightSearch) {
             const { origin, destination, startDate, endDate } = session.lastFlightSearch;
             if (origin && destination && startDate) {
               // Construct Google Flights search URL
@@ -55,9 +84,13 @@ class SMSController {
                 bookingUrl += `%20returning%20${endDate}`;
               }
 
-              console.log(`🔗 Generated Google Flights URL: ${origin} → ${destination} on ${startDate}`);
+              urlType = 'fallback-search';
+              console.log(`🔗 Using fallback search URL: ${origin} → ${destination} on ${startDate}`);
             }
           }
+
+          // Log final result
+          console.log(`📊 Booking URL generation complete - Method: ${urlType}`);
 
           const priceDisplay = selectedFlight.displayPrice || `$${selectedFlight.price}`;
 
