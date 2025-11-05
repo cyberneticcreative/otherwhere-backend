@@ -27,28 +27,44 @@ class SMSController {
         const selectedIndex = parseInt(flightSelection[1]) - 1;
         const selectedFlight = session.lastFlightResults[selectedIndex];
 
-        if (selectedFlight && selectedFlight.bookingToken) {
+        if (selectedFlight) {
           console.log(`✈️ User selected flight #${flightSelection[1]}, fetching booking URL...`);
 
-          try {
-            const googleFlightsService = require('../services/googleFlightsService');
-            const bookingData = await googleFlightsService.getBookingURL(selectedFlight.bookingToken);
+          let bookingUrl = null;
 
-            const bookingMessage = `Great choice! ✈️\n\n${selectedFlight.airline} - $${selectedFlight.price}\n${selectedFlight.departure} → ${selectedFlight.arrival}\n\n🔗 Book here: ${bookingData.bookingUrl}`;
-
-            await twilioService.sendSMS(from, bookingMessage);
-
-            res.type('text/xml');
-            res.send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
-
-            const totalDuration = Date.now() - startTime;
-            console.log(`⏱️  TOTAL request time: ${totalDuration}ms (${(totalDuration/1000).toFixed(1)}s)`);
-            return;
-
-          } catch (error) {
-            console.error('❌ Error getting booking URL:', error);
-            // Fall through to normal assistant handling
+          // Try to get booking URL using token
+          if (selectedFlight.bookingToken) {
+            try {
+              const googleFlightsService = require('../services/googleFlightsService');
+              const bookingData = await googleFlightsService.getBookingURL(selectedFlight.bookingToken);
+              bookingUrl = bookingData.bookingUrl;
+            } catch (error) {
+              console.error('❌ Error getting booking URL from token:', error.message);
+            }
           }
+
+          // Fallback: construct manual Google Flights search URL if token failed
+          if (!bookingUrl && session.lastFlightSearch) {
+            const { origin, destination, startDate, endDate } = session.lastFlightSearch;
+            if (origin && destination && startDate) {
+              // Construct Google Flights URL manually
+              bookingUrl = `https://www.google.com/travel/flights/search?tfs=CBwQAhoeEgoyMDI1LTEyLTE0ag0IAhIJL20vMDUycDdyDQgCEgkvbS8wNGpwbCIKYgoyMDI2LTAxLTI2`;
+              console.log(`🔗 Using fallback Google Flights search URL`);
+            }
+          }
+
+          const bookingMessage = bookingUrl
+            ? `Great choice! ✈️\n\n${selectedFlight.airline} - $${selectedFlight.price}\n${selectedFlight.departure} → ${selectedFlight.arrival}\n\n🔗 Book here: ${bookingUrl}`
+            : `Great choice! ✈️\n\n${selectedFlight.airline} - $${selectedFlight.price}\n${selectedFlight.departure} → ${selectedFlight.arrival}\n\nPlease search on Google Flights for this route.`;
+
+          await twilioService.sendSMS(from, bookingMessage);
+
+          res.type('text/xml');
+          res.send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+
+          const totalDuration = Date.now() - startTime;
+          console.log(`⏱️  TOTAL request time: ${totalDuration}ms (${(totalDuration/1000).toFixed(1)}s)`);
+          return;
         }
       }
 
@@ -130,9 +146,15 @@ class SMSController {
       if (flightResults && flightResults.flights && flightResults.flights.length > 0) {
         console.log('✈️ Sending flight results as separate SMS...');
 
-        // Store flight results in session so user can select one later
+        // Store flight results and search details in session so user can select one later
         await sessionManager.updateSession(from, {
-          lastFlightResults: flightResults.flights
+          lastFlightResults: flightResults.flights,
+          lastFlightSearch: {
+            origin: flightResults.originCode,
+            destination: flightResults.destCode,
+            startDate: flightResults.searchParams?.outboundDate,
+            endDate: flightResults.searchParams?.returnDate
+          }
         });
         console.log(`💾 Stored ${flightResults.flights.length} flights in session`);
 

@@ -472,6 +472,20 @@ class GoogleFlightsService {
       const stops = flight.stops || 0;
       const stopsText = stops === 0 ? 'Direct' : `${stops} stop${stops > 1 ? 's' : ''}`;
 
+      // Try multiple possible token fields for booking
+      const bookingToken = flight.token
+        || flight.booking_token
+        || flight.purchase_token
+        || flight.next_token
+        || flight.id
+        || '';
+
+      // Debug: log available fields for first flight
+      if (index === 0) {
+        console.log(`[GoogleFlights] Sample flight keys:`, Object.keys(flight));
+        console.log(`[GoogleFlights] Using booking token from field: ${bookingToken ? Object.keys(flight).find(k => flight[k] === bookingToken) : 'NONE'}`);
+      }
+
       return {
         index: index + 1,
         airline,
@@ -483,7 +497,7 @@ class GoogleFlightsService {
         durationMinutes: flight.duration?.raw || 0,
         stops,
         stopsText,
-        bookingToken: flight.next_token || '',
+        bookingToken: bookingToken,
         airlineLogo: flight.airline_logo || '',
         carbonEmissions: flight.carbon_emissions,
         layovers: flight.layovers || null,
