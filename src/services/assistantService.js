@@ -124,12 +124,36 @@ class AssistantService {
               const args = JSON.parse(toolCall.function.arguments);
               console.log(`🔍 search_trips called with:`, args);
 
+              // Fix dates if they're in the past
+              const fixPastDate = (dateStr) => {
+                if (!dateStr) return null;
+
+                const date = new Date(dateStr);
+                const now = new Date();
+
+                // If the date is in the past, move it to next year
+                if (date < now) {
+                  const currentYear = now.getFullYear();
+                  const nextYear = currentYear + 1;
+
+                  // Replace the year in the date string
+                  const correctedDate = dateStr.replace(/^\d{4}/, nextYear.toString());
+                  console.log(`📅 Corrected past date: ${dateStr} → ${correctedDate}`);
+                  return correctedDate;
+                }
+
+                return dateStr;
+              };
+
+              const correctedCheckIn = fixPastDate(args.check_in);
+              const correctedCheckOut = fixPastDate(args.check_out);
+
               // Store trip search data
               tripSearchData = {
                 destination: args.destination,
                 origin: args.origin || 'LAX',
-                startDate: args.check_in || null,
-                endDate: args.check_out || null,
+                startDate: correctedCheckIn,
+                endDate: correctedCheckOut,
                 travelers: args.travelers || 1,
                 budget: args.budget_usd ? {
                   amount: args.budget_usd,

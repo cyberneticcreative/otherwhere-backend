@@ -120,12 +120,36 @@ class WebhookController {
 
         console.log(`🛫 Processing search_trips for ${destination}`);
 
+        // Fix dates if they're in the past
+        const fixPastDate = (dateStr) => {
+          if (!dateStr) return null;
+
+          const date = new Date(dateStr);
+          const now = new Date();
+
+          // If the date is in the past, move it to next year
+          if (date < now) {
+            const currentYear = now.getFullYear();
+            const nextYear = currentYear + 1;
+
+            // Replace the year in the date string
+            const correctedDate = dateStr.replace(/^\d{4}/, nextYear.toString());
+            console.log(`📅 Corrected past date: ${dateStr} → ${correctedDate}`);
+            return correctedDate;
+          }
+
+          return dateStr;
+        };
+
+        const correctedCheckIn = fixPastDate(check_in);
+        const correctedCheckOut = fixPastDate(check_out);
+
         // Build trip details object
         const tripDetails = {
           destination,
           origin,
-          startDate: check_in,
-          endDate: check_out,
+          startDate: correctedCheckIn,
+          endDate: correctedCheckOut,
           travelers,
           budget: budget_usd ? {
             amount: budget_usd,
@@ -138,7 +162,7 @@ class WebhookController {
 
         try {
           // Search flights using Google Flights API
-          console.log(`[GoogleFlights] Searching: ${origin} → ${destination} on ${check_in}`);
+          console.log(`[GoogleFlights] Searching: ${origin} → ${destination} on ${correctedCheckIn}`);
 
           // Step 1: Resolve airport codes (sequential to avoid rate limits)
           console.log(`🔍 Searching origin airport: ${origin}`);
@@ -175,8 +199,8 @@ class WebhookController {
           const searchParams = {
             departureId: originCode,
             arrivalId: destCode,
-            outboundDate: check_in,
-            returnDate: check_out || undefined, // Only add if provided
+            outboundDate: correctedCheckIn,
+            returnDate: correctedCheckOut || undefined, // Only add if provided
             adults: parseInt(travelers) || 1,
             travelClass: 'ECONOMY',
             currency: 'USD'
