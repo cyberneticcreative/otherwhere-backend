@@ -55,9 +55,22 @@ class SMSController {
           if (!bookingUrl && session.lastFlightSearch) {
             const { origin, destination, startDate, endDate } = session.lastFlightSearch;
             if (origin && destination && startDate) {
-              // Construct Google Flights URL manually
-              bookingUrl = `https://www.google.com/travel/flights/search?tfs=CBwQAhoeEgoyMDI1LTEyLTE0ag0IAhIJL20vMDUycDdyDQgCEgkvbS8wNGpwbCIKYgoyMDI2LTAxLTI2`;
-              console.log(`🔗 Using fallback Google Flights search URL`);
+              // Construct dynamic Google Flights search URL
+              const params = new URLSearchParams({
+                tfs: 'CBwQAho',
+                hl: 'en',
+                curr: 'USD'
+              });
+
+              // Build URL with origin, destination, and dates
+              bookingUrl = `https://www.google.com/travel/flights/search?` +
+                `q=Flights%20from%20${origin}%20to%20${destination}%20on%20${startDate}`;
+
+              if (endDate) {
+                bookingUrl += `%20returning%20${endDate}`;
+              }
+
+              console.log(`🔗 Using fallback Google Flights search URL: ${origin} → ${destination} on ${startDate}`);
             }
           }
 
