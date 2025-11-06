@@ -2,9 +2,10 @@ const twilioService = require('../services/twilioService');
 const llmService = require('../services/llmService');
 const assistantService = require('../services/assistantService');
 const sessionManager = require('../services/sessionManager');
-const duffelLinksService = require('../services/duffelLinksService');
+const duffelOffersService = require('../services/duffelOffersService');
 const airbnbService = require('../services/airbnbService');
-const { getOrCreateConversation, createLinkSession } = require('../db/queries');
+const tokenService = require('../utils/tokenService');
+const { getOrCreateConversation, createBookingLink } = require('../db/queries');
 
 class SMSController {
   /**
@@ -177,20 +178,20 @@ class SMSController {
       const smsDuration = Date.now() - smsStartTime;
       console.log(`⏱️  SMS send took ${smsDuration}ms`);
 
-      // If we have flight results, create a Duffel Links session
+      // If we have flight results, search Duffel Offers and create custom booking link
       if (flightResults && flightResults.flights && flightResults.flights.length > 0) {
-        console.log('✈️ Creating Duffel Links session for flight search...');
+        console.log('✈️ Searching Duffel Offers for custom booking link...');
 
         try {
           // Normalize search parameters for Duffel
-          const searchParams = duffelLinksService.normalizeSearchParams({
+          const searchParams = {
             origin: flightResults.originCode,
             destination: flightResults.destCode,
             departure_date: flightResults.searchParams?.outboundDate,
             return_date: flightResults.searchParams?.returnDate,
             passengers: flightResults.searchParams?.passengers || 1,
             cabin_class: flightResults.searchParams?.cabinClass || 'economy'
-          });
+          };
 
           // Try to get conversation from database (optional)
           let conversationId = null;
@@ -204,50 +205,85 @@ class SMSController {
             console.warn('⚠️ Database unavailable, continuing without tracking:', dbError.message);
           }
 
-          // Create Duffel Links session (works with or without conversationId)
-          const session = await duffelLinksService.createFlightSession({
-            conversationId: conversationId,
-            phone: from,
-            searchParams: searchParams
+          // Search for flights using Duffel Offers API
+          console.log('🔍 Searching flights with Duffel Offers API...');
+          const offers = await duffelOffersService.searchFlights({
+            ...searchParams,
+            conversationId
           });
 
-          // Try to store session in database (optional)
-          if (conversationId) {
+          if (offers && offers.length > 0) {
+            console.log(`✅ Found ${offers.length} flight offers`);
+
+            // Use the best offer (first one, usually cheapest)
+            const topOffer = offers[0];
+
+            // Create JWT token for booking link
+            const { token, jti, expiresAt } = tokenService.signBookingToken(
+              {
+                offer_id: topOffer.id,
+                conversation_id: conversationId
+              },
+              30 // 30 minutes expiration
+            );
+
+            // Store booking link in database
             try {
-              await createLinkSession({
+              await createBookingLink({
+                tokenJti: jti,
+                offerId: topOffer.id,
+                accountId: null,
                 conversationId: conversationId,
-                duffelSessionId: session.id,
-                sessionUrl: session.url,
-                expiresAt: session.expires_at,
-                searchParams: searchParams
+                offerSnapshot: topOffer,
+                expiresAt: expiresAt
               });
-              console.log('✅ Session tracked in database');
+              console.log('✅ Booking link stored in database');
             } catch (dbError) {
-              console.warn('⚠️ Could not track session in database:', dbError.message);
+              console.warn('⚠️ Could not store booking link:', dbError.message);
             }
+
+            // Generate booking URL
+            const baseUrl = process.env.BASE_URL || 'http://localhost:3000';
+            const bookingUrl = `${baseUrl}/book/${token}`;
+
+            // Format SMS message with booking link
+            let flightMessage = `✈️ Found ${offers.length} flight${offers.length > 1 ? 's' : ''}!\n\n`;
+            flightMessage += `Best option: ${topOffer.owner.name}\n`;
+            flightMessage += `${topOffer.departure.airport} → ${topOffer.arrival.airport}\n`;
+            flightMessage += `${topOffer.stops === 0 ? 'Nonstop' : `${topOffer.stops} stop${topOffer.stops > 1 ? 's' : ''}`}\n`;
+            flightMessage += `${topOffer.total_currency} ${topOffer.total_with_fee.toFixed(2)} (incl. 2% fee)\n\n`;
+            flightMessage += `🔗 Book securely:\n${bookingUrl}\n\n`;
+            flightMessage += `Includes fare monitoring + rebooking support.\n`;
+            flightMessage += `Link expires in 30 minutes.`;
+
+            // Send booking link as a second SMS (after a brief delay for better UX)
+            setTimeout(async () => {
+              try {
+                await twilioService.sendLongSMS(from, flightMessage);
+                console.log('✅ Custom booking link SMS sent');
+              } catch (smsError) {
+                console.error('❌ Failed to send booking link SMS:', smsError);
+              }
+            }, 2000); // 2 second delay
+
+          } else {
+            console.warn('⚠️ No offers found from Duffel');
+
+            // Send message indicating no results
+            setTimeout(async () => {
+              try {
+                await twilioService.sendSMS(
+                  from,
+                  "I couldn't find available flights for those dates. Try different dates or routes."
+                );
+              } catch (smsError) {
+                console.error('❌ Failed to send no results message:', smsError);
+              }
+            }, 2000);
           }
 
-          console.log('✅ Duffel Links session created:', session.id);
-
-          // Format SMS message with Links URL
-          const flightMessage = duffelLinksService.formatLinksSMS({
-            sessionUrl: session.url,
-            searchParams: searchParams,
-            expiresAt: session.expires_at
-          });
-
-          // Send Links URL as a second SMS (after a brief delay for better UX)
-          setTimeout(async () => {
-            try {
-              await twilioService.sendLongSMS(from, flightMessage);
-              console.log('✅ Duffel Links SMS sent');
-            } catch (smsError) {
-              console.error('❌ Failed to send Duffel Links SMS:', smsError);
-            }
-          }, 2000); // 2 second delay
-
         } catch (error) {
-          console.error('❌ Failed to create Duffel Links session:', error);
+          console.error('❌ Failed to create custom booking link:', error);
 
           // Send fallback message
           setTimeout(async () => {
