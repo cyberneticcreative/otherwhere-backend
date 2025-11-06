@@ -192,24 +192,40 @@ class SMSController {
             cabin_class: flightResults.searchParams?.cabinClass || 'economy'
           });
 
-          // Get or create conversation in database
-          const conversation = await getOrCreateConversation(from, 'browse', searchParams);
+          // Try to get conversation from database (optional)
+          let conversationId = null;
+          try {
+            const conversation = await getOrCreateConversation(from, 'browse', searchParams);
+            conversationId = conversation?.id || null;
+            if (conversationId) {
+              console.log('✅ Conversation tracked:', conversationId);
+            }
+          } catch (dbError) {
+            console.warn('⚠️ Database unavailable, continuing without tracking:', dbError.message);
+          }
 
-          // Create Duffel Links session
+          // Create Duffel Links session (works with or without conversationId)
           const session = await duffelLinksService.createFlightSession({
-            conversationId: conversation.id,
+            conversationId: conversationId,
             phone: from,
             searchParams: searchParams
           });
 
-          // Store session in database
-          await createLinkSession({
-            conversationId: conversation.id,
-            duffelSessionId: session.id,
-            sessionUrl: session.url,
-            expiresAt: session.expires_at,
-            searchParams: searchParams
-          });
+          // Try to store session in database (optional)
+          if (conversationId) {
+            try {
+              await createLinkSession({
+                conversationId: conversationId,
+                duffelSessionId: session.id,
+                sessionUrl: session.url,
+                expiresAt: session.expires_at,
+                searchParams: searchParams
+              });
+              console.log('✅ Session tracked in database');
+            } catch (dbError) {
+              console.warn('⚠️ Could not track session in database:', dbError.message);
+            }
+          }
 
           console.log('✅ Duffel Links session created:', session.id);
 

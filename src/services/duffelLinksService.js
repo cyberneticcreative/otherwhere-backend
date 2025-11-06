@@ -76,12 +76,18 @@ async function createFlightSession(params) {
       expiresAt: session.expires_at
     });
 
-    // Log event
-    await logEvent('link_session_created', 'link_session', conversationId, {
-      duffel_session_id: session.id,
-      session_url: session.url,
-      search_params: searchParams
-    });
+    // Log event (optional, only if database available)
+    if (conversationId) {
+      try {
+        await logEvent('link_session_created', 'link_session', conversationId, {
+          duffel_session_id: session.id,
+          session_url: session.url,
+          search_params: searchParams
+        });
+      } catch (logError) {
+        console.warn('⚠️ Could not log event to database:', logError.message);
+      }
+    }
 
     return {
       id: session.id,
@@ -93,10 +99,17 @@ async function createFlightSession(params) {
   } catch (error) {
     console.error('Failed to create Duffel Links session:', error);
 
-    await logEvent('link_session_failed', 'link_session', conversationId, {
-      error: error.message,
-      search_params: searchParams
-    });
+    // Try to log failure (optional)
+    if (conversationId) {
+      try {
+        await logEvent('link_session_failed', 'link_session', conversationId, {
+          error: error.message,
+          search_params: searchParams
+        });
+      } catch (logError) {
+        console.warn('⚠️ Could not log error to database:', logError.message);
+      }
+    }
 
     throw new Error(handleDuffelError(error, 'Create Links session'));
   }
