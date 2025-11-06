@@ -1,6 +1,7 @@
 const OpenAI = require('openai');
-const googleFlightsService = require('./googleFlightsService');
+const duffelLinksService = require('./duffelLinksService');
 const airbnbService = require('./airbnbService');
+const { getOrCreateConversation, createLinkSession } = require('../db/queries');
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
@@ -211,94 +212,68 @@ class AssistantService {
                 } : null
               };
 
-              // ACTUALLY SEARCH FOR FLIGHTS using Google Flights API
+              // CREATE DUFFEL LINKS SESSION for flight booking
               try {
                 const flightSearchStart = Date.now();
-                console.log('🛫 Calling Google Flights API...');
+                console.log('🛫 Creating Duffel Links session...');
 
-                // Step 1: Resolve airport codes (sequential to avoid rate limits)
-                console.log(`🔍 Searching origin airport: ${tripSearchData.origin}`);
-                const originAirports = await googleFlightsService.searchAirport(tripSearchData.origin);
+                // Note: We need a phone number from the context to create a conversation
+                // For now, we'll return a message to the assistant that a link will be sent
+                // The actual link creation will happen when the user responds via SMS
 
-                console.log(`🔍 Searching destination airport: ${tripSearchData.destination}`);
-                const destAirports = await googleFlightsService.searchAirport(tripSearchData.destination);
+                // Normalize search parameters for Duffel
+                const searchParams = duffelLinksService.normalizeSearchParams({
+                  origin: tripSearchData.origin,
+                  destination: tripSearchData.destination,
+                  departure_date: tripSearchData.startDate,
+                  return_date: tripSearchData.endDate,
+                  passengers: parseInt(tripSearchData.travelers) || 1,
+                  cabin_class: 'economy'
+                });
 
-                if (!originAirports || originAirports.length === 0) {
-                  throw new Error(`Could not find airport for: ${tripSearchData.origin}`);
+                // Validate search parameters
+                const validation = duffelLinksService.validateSearchParams(searchParams);
+                if (!validation.valid) {
+                  throw new Error(`Missing required parameters: ${validation.missing.join(', ')}`);
                 }
 
-                if (!destAirports || destAirports.length === 0) {
-                  throw new Error(`Could not find airport for: ${tripSearchData.destination}`);
-                }
-
-                const originCode = originAirports[0]?.code;
-                const destCode = destAirports[0]?.code;
-
-                // Validate that we actually got valid airport codes
-                if (!originCode) {
-                  console.error(`[GoogleFlights] Origin airport missing code:`, originAirports[0]);
-                  throw new Error(`Could not resolve airport code for: ${tripSearchData.origin}`);
-                }
-
-                if (!destCode) {
-                  console.error(`[GoogleFlights] Destination airport missing code:`, destAirports[0]);
-                  throw new Error(`Could not resolve airport code for: ${tripSearchData.destination}`);
-                }
-
-                console.log(`[GoogleFlights] Resolved: ${originCode} → ${destCode}`);
-
-                // Step 2: Search flights
-                const searchParams = {
-                  departureId: originCode,
-                  arrivalId: destCode,
-                  outboundDate: tripSearchData.startDate,
-                  returnDate: tripSearchData.endDate || undefined,
-                  adults: parseInt(tripSearchData.travelers) || 1,
-                  travelClass: 'ECONOMY',
-                  currency: 'USD'
-                };
-
-                const searchResults = await googleFlightsService.searchFlights(searchParams);
-
-                // Step 3: Format results
-                const formattedFlights = googleFlightsService.formatFlightResults(searchResults, 3);
-
-                // Store formatted results for SMS sending later
+                // Store flight search parameters for SMS handler to pick up
                 flightResults = {
-                  flights: formattedFlights,
-                  originCode,
-                  destCode,
-                  searchParams
+                  flights: [{ /* Placeholder for compatibility */ }],
+                  originCode: searchParams.origin,
+                  destCode: searchParams.destination,
+                  searchParams: {
+                    outboundDate: searchParams.departure_date,
+                    returnDate: searchParams.return_date,
+                    passengers: searchParams.passengers,
+                    cabinClass: searchParams.cabin_class
+                  }
                 };
 
-                // Return flight results to the assistant
-                const resultsMessage = formattedFlights.length > 0
-                  ? `${dateWarning}Found ${formattedFlights.length} flights! Best price: $${formattedFlights[0].price} on ${formattedFlights[0].airline}. Flight details are being sent via SMS now.`
-                  : `${dateWarning}No flights found for these dates. Try different dates or closer to your travel time.`;
+                // Return success message to assistant
+                const resultsMessage = `${dateWarning}Great! I'll send you a booking link for flights from ${searchParams.origin} to ${searchParams.destination}. You'll be able to browse all available flights and book directly through our secure checkout.`;
 
                 toolOutputs.push({
                   tool_call_id: toolCall.id,
                   output: JSON.stringify({
                     success: true,
                     message: resultsMessage,
-                    flightCount: formattedFlights.length,
-                    bestPrice: formattedFlights[0]?.price || null,
-                    bestAirline: formattedFlights[0]?.airline || null
+                    searchParams: searchParams
                   })
                 });
 
                 const flightSearchDuration = Date.now() - flightSearchStart;
-                console.log(`✅ Flight search completed: ${formattedFlights.length} results in ${flightSearchDuration}ms`);
+                console.log(`✅ Duffel Links session prepared in ${flightSearchDuration}ms`);
 
               } catch (error) {
-                console.error('❌ Google Flights API error:', error.message);
+                console.error('❌ Duffel Links preparation error:', error.message);
 
                 // Return error to assistant
                 toolOutputs.push({
                   tool_call_id: toolCall.id,
                   output: JSON.stringify({
                     success: false,
-                    message: 'Unable to search flights at the moment. Please try again or check city names.'
+                    message: 'Unable to prepare flight booking at the moment. Please try again or check city names.'
                   })
                 });
               }

@@ -1,8 +1,9 @@
 const twilioService = require('../services/twilioService');
 const sessionManager = require('../services/sessionManager');
 const elevenLabsService = require('../services/elevenLabsService');
-const googleFlightsService = require('../services/googleFlightsService');
+const duffelLinksService = require('../services/duffelLinksService');
 const airbnbService = require('../services/airbnbService');
+const { getOrCreateConversation, createLinkSession } = require('../db/queries');
 
 class WebhookController {
   /**
@@ -190,110 +191,95 @@ class WebhookController {
         const phoneNumber = metadata?.phone_number || metadata?.from;
 
         try {
-          // Search flights using Google Flights API
-          console.log(`[GoogleFlights] Searching: ${origin} → ${destination} on ${correctedCheckIn}`);
+          // Create Duffel Links session for flights
+          console.log(`[Duffel] Creating booking session: ${origin} → ${destination} on ${correctedCheckIn}`);
 
-          // Step 1: Resolve airport codes (sequential to avoid rate limits)
-          console.log(`🔍 Searching origin airport: ${origin}`);
-          const originAirports = await googleFlightsService.searchAirport(origin);
-
-          console.log(`🔍 Searching destination airport: ${destination}`);
-          const destAirports = await googleFlightsService.searchAirport(destination);
-
-          if (!originAirports || originAirports.length === 0) {
-            throw new Error(`Could not find airport for: ${origin}`);
-          }
-
-          if (!destAirports || destAirports.length === 0) {
-            throw new Error(`Could not find airport for: ${destination}`);
-          }
-
-          const originCode = originAirports[0]?.code;
-          const destCode = destAirports[0]?.code;
-
-          // Validate that we actually got valid airport codes
-          if (!originCode) {
-            console.error(`[GoogleFlights] Origin airport missing code:`, originAirports[0]);
-            throw new Error(`Could not resolve airport code for: ${origin}`);
-          }
-
-          if (!destCode) {
-            console.error(`[GoogleFlights] Destination airport missing code:`, destAirports[0]);
-            throw new Error(`Could not resolve airport code for: ${destination}`);
-          }
-
-          console.log(`[GoogleFlights] Resolved: ${originCode} → ${destCode}`);
-
-          // Step 2: Search flights
-          const searchParams = {
-            departureId: originCode,
-            arrivalId: destCode,
-            outboundDate: correctedCheckIn,
-            returnDate: correctedCheckOut || undefined, // Only add if provided
-            adults: parseInt(travelers) || 1,
-            travelClass: 'ECONOMY',
-            currency: 'USD'
-          };
-
-          const searchResults = await googleFlightsService.searchFlights(searchParams);
-
-          // Step 3: Format top 3 results for SMS
-          const formattedFlights = googleFlightsService.formatFlightResults(searchResults, 3);
-
-          if (formattedFlights.length === 0) {
-            throw new Error('No flights found for your search');
-          }
-
-          // Step 4: Generate SMS message
-          const smsMessage = googleFlightsService.formatSMSMessage(formattedFlights, {
-            departureId: originCode,
-            arrivalId: destCode,
-            outboundDate: check_in
+          // Normalize search parameters for Duffel
+          const searchParams = duffelLinksService.normalizeSearchParams({
+            origin: origin,
+            destination: destination,
+            departure_date: correctedCheckIn,
+            return_date: correctedCheckOut,
+            passengers: parseInt(travelers) || 1,
+            cabin_class: 'economy'
           });
 
-          // Step 5: Save to session if phone number available
+          // Validate search parameters
+          const validation = duffelLinksService.validateSearchParams(searchParams);
+          if (!validation.valid) {
+            throw new Error(`Missing required parameters: ${validation.missing.join(', ')}`);
+          }
+
+          // Get or create conversation in database
+          const conversation = await getOrCreateConversation(
+            phoneNumber,
+            'browse',
+            searchParams
+          );
+
+          // Create Duffel Links session
+          const session = await duffelLinksService.createFlightSession({
+            conversationId: conversation.id,
+            phone: phoneNumber,
+            searchParams: searchParams
+          });
+
+          // Store session in database
+          await createLinkSession({
+            conversationId: conversation.id,
+            duffelSessionId: session.id,
+            sessionUrl: session.url,
+            expiresAt: session.expires_at,
+            searchParams: searchParams
+          });
+
+          console.log('✅ Duffel Links session created:', session.id);
+
+          // Format SMS message with booking link
+          const smsMessage = duffelLinksService.formatLinksSMS({
+            sessionUrl: session.url,
+            searchParams: searchParams,
+            expiresAt: session.expires_at
+          });
+
+          // Save to session for tracking
           if (phoneNumber) {
             await sessionManager.updateSession(phoneNumber, {
               tripDetails,
               context: {
                 conversationId: conversation_id,
-                lastFlightSearch: {
-                  origin,
-                  destination,
-                  originCode,
-                  destCode,
-                  date: check_in,
-                  returnDate: check_out,
-                  travelers,
-                  results: formattedFlights
+                lastDuffelSession: {
+                  sessionId: session.id,
+                  sessionUrl: session.url,
+                  searchParams: searchParams
                 },
                 tripSearchInitiated: true,
                 tripSearchTimestamp: new Date().toISOString()
               }
             });
 
-            // Step 6: Send SMS with flight results
+            // Send SMS with Duffel Links URL
             await twilioService.sendLongSMS(phoneNumber, smsMessage);
-            console.log(`✅ Sent flight results via SMS to ${phoneNumber}`);
+            console.log(`✅ Sent Duffel booking link via SMS to ${phoneNumber}`);
           }
 
-          // Step 7: Return success response to ElevenLabs
+          // Return success response to ElevenLabs
           res.json({
             result: phoneNumber
-              ? `${dateWarning}Great! I found ${formattedFlights.length} flights from ${origin} to ${destination}. I've texted you the details with prices and times. Reply with a number to get the booking link!`
-              : `${dateWarning}I found ${formattedFlights.length} flights from ${origin} to ${destination}. The best option is $${formattedFlights[0].price} on ${formattedFlights[0].airline}.`,
+              ? `${dateWarning}Perfect! I've created a booking link for flights from ${origin} to ${destination}. Check your texts for the link to browse and book flights.`
+              : `${dateWarning}I've found flights from ${origin} to ${destination}. You can browse options and book directly.`,
             success: true
           });
 
         } catch (searchError) {
-          console.error('Flight search error:', searchError);
+          console.error('Duffel Links creation error:', searchError);
 
           // Send error message via SMS if phone available
           if (phoneNumber) {
             try {
               await twilioService.sendSMS(
                 phoneNumber,
-                `Sorry, I had trouble finding flights from ${origin} to ${destination}. Please try different cities or dates.`
+                `Sorry, I had trouble creating your booking link for ${origin} to ${destination}. Please try again or contact support.`
               );
             } catch (smsError) {
               console.error('Failed to send error SMS:', smsError);
@@ -301,7 +287,7 @@ class WebhookController {
           }
 
           res.json({
-            result: `I'm having trouble finding flights from ${origin} to ${destination} right now. Could you try different cities or check the spelling?`,
+            result: `I'm having trouble creating a booking link for ${origin} to ${destination} right now. Could you try again in a moment?`,
             success: false,
             error: searchError.message
           });

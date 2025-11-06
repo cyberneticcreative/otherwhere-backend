@@ -17,7 +17,7 @@ const sessionManager = require('./services/sessionManager');
 
 // Import services
 const realtimeService = require('./services/realtimeService');
-const googleFlightsService = require('./services/googleFlightsService');
+const duffelClient = require('./services/duffelClient');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -55,7 +55,15 @@ app.post('/voice/status', voiceController.handleStatusCallback);
 app.post('/webhook/elevenlabs', webhookController.handleElevenLabsWebhook);
 app.post('/webhook/elevenlabs/tool-call', webhookController.handleElevenLabsToolCall);
 
-// Flight search API endpoints
+// Duffel webhooks
+const duffelWebhookRouter = require('./routes/webhooks/duffel');
+app.use('/webhooks/duffel', duffelWebhookRouter);
+
+// Duffel Links routes
+const linksRouter = require('./routes/links');
+app.use('/links', linksRouter);
+
+// ARCHIVED: Old Flight search API endpoints (replaced by Duffel Links)
 app.post('/api/flights/search', async (req, res) => {
   try {
     const { origin, destination, date, returnDate, passengers = 1, travelClass = 'economy', phoneNumber } = req.body;
@@ -258,13 +266,28 @@ wss.on('connection', async (ws, req) => {
 });
 
 // Start server - bind to 0.0.0.0 for Railway/Docker compatibility
-server.listen(PORT, '0.0.0.0', () => {
+server.listen(PORT, '0.0.0.0', async () => {
   console.log('🚀 Otherwhere Backend running on port ' + PORT);
   console.log('📱 SMS webhook: http://localhost:' + PORT + '/sms/inbound');
   console.log('📞 Voice webhook: http://localhost:' + PORT + '/voice/inbound');
   console.log('🔌 WebSocket endpoint: ws://localhost:' + PORT + '/voice/media-stream');
   console.log('🧠 Using OpenAI model: ' + process.env.OPENAI_MODEL);
   console.log('🎙️ OpenAI Realtime API: ' + (realtimeService.isConfigured() ? 'Enabled' : 'Disabled'));
+  console.log('✈️ Duffel API: ' + (duffelClient.isConfigured() ? `${duffelClient.getApiMode()} mode` : 'Not configured'));
+  console.log('🔗 Duffel Links: http://localhost:' + PORT + '/links/session');
+  console.log('📥 Duffel Webhooks: http://localhost:' + PORT + '/webhooks/duffel');
+
+  // Test database connection
+  if (process.env.DATABASE_URL) {
+    try {
+      const db = require('./db');
+      await db.testConnection();
+    } catch (error) {
+      console.error('⚠️ Database connection failed:', error.message);
+    }
+  } else {
+    console.log('⚠️ DATABASE_URL not set - database features disabled');
+  }
 });
 
 module.exports = app;
