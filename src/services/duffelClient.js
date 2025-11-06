@@ -11,6 +11,14 @@ const duffel = new Duffel({
   debug: process.env.NODE_ENV === 'development'
 });
 
+// Debug: Check if Links API is available
+if (process.env.DUFFEL_ACCESS_TOKEN) {
+  console.log('🔍 Duffel client initialized');
+  console.log('🔍 Token present:', !!process.env.DUFFEL_ACCESS_TOKEN);
+  console.log('🔍 duffel.links available:', !!duffel.links);
+  console.log('🔍 duffel.links.sessions available:', !!duffel?.links?.sessions);
+}
+
 /**
  * Test Duffel API connection
  * @returns {Promise<boolean>}
