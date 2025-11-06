@@ -7,26 +7,33 @@ const { Pool } = require('pg');
 const fs = require('fs');
 const path = require('path');
 
-// Create connection pool
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === 'production' ? {
-    rejectUnauthorized: false
-  } : false,
-  max: 20, // Maximum number of clients in pool
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 2000,
-});
+// Check if database is configured
+const isConfigured = !!process.env.DATABASE_URL;
 
-// Log pool errors
-pool.on('error', (err, client) => {
-  console.error('Unexpected error on idle client', err);
-});
+// Create connection pool only if DATABASE_URL is set
+let pool = null;
 
-// Test connection
-pool.on('connect', () => {
-  console.log('✅ Database connected');
-});
+if (isConfigured) {
+  pool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: process.env.NODE_ENV === 'production' ? {
+      rejectUnauthorized: false
+    } : false,
+    max: 20, // Maximum number of clients in pool
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 2000,
+  });
+
+  // Log pool errors
+  pool.on('error', (err, client) => {
+    console.error('Unexpected error on idle client', err);
+  });
+
+  // Test connection
+  pool.on('connect', () => {
+    console.log('✅ Database connected');
+  });
+}
 
 /**
  * Execute a query
@@ -35,6 +42,10 @@ pool.on('connect', () => {
  * @returns {Promise<Object>} Query result
  */
 async function query(text, params) {
+  if (!isConfigured || !pool) {
+    throw new Error('Database not configured. Set DATABASE_URL environment variable.');
+  }
+
   const start = Date.now();
   try {
     const res = await pool.query(text, params);
@@ -65,6 +76,10 @@ async function query(text, params) {
  * @returns {Promise<Object>} Database client
  */
 async function getClient() {
+  if (!isConfigured || !pool) {
+    throw new Error('Database not configured. Set DATABASE_URL environment variable.');
+  }
+
   const client = await pool.connect();
   const query = client.query;
   const release = client.release;
@@ -143,5 +158,6 @@ module.exports = {
   pool,
   runMigrations,
   testConnection,
-  close
+  close,
+  isConfigured
 };

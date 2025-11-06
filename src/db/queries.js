@@ -5,11 +5,22 @@
 
 const db = require('./index');
 
+// Helper to check if database is available
+function requireDatabase() {
+  if (!db.isConfigured) {
+    console.warn('Database operation skipped - DATABASE_URL not configured');
+    return false;
+  }
+  return true;
+}
+
 /**
  * CONVERSATIONS
  */
 
 async function getConversationByPhone(phone) {
+  if (!requireDatabase()) return null;
+
   const result = await db.query(
     'SELECT * FROM conversations WHERE phone = $1 ORDER BY created_at DESC LIMIT 1',
     [phone]
@@ -18,6 +29,8 @@ async function getConversationByPhone(phone) {
 }
 
 async function createConversation(phone, intent = null, searchParams = {}) {
+  if (!requireDatabase()) return null;
+
   const result = await db.query(
     `INSERT INTO conversations (phone, intent, search_params)
      VALUES ($1, $2, $3)
@@ -28,6 +41,8 @@ async function createConversation(phone, intent = null, searchParams = {}) {
 }
 
 async function updateConversation(id, updates) {
+  if (!requireDatabase()) return null;
+
   const { intent, searchParams } = updates;
   const result = await db.query(
     `UPDATE conversations
@@ -42,6 +57,8 @@ async function updateConversation(id, updates) {
 }
 
 async function getOrCreateConversation(phone, intent = null, searchParams = {}) {
+  if (!requireDatabase()) return null;
+
   let conversation = await getConversationByPhone(phone);
   if (!conversation) {
     conversation = await createConversation(phone, intent, searchParams);
@@ -54,6 +71,8 @@ async function getOrCreateConversation(phone, intent = null, searchParams = {}) 
  */
 
 async function createLinkSession(data) {
+  if (!requireDatabase()) return null;
+
   const {
     conversationId,
     duffelSessionId,
@@ -79,6 +98,8 @@ async function createLinkSession(data) {
 }
 
 async function getLinkSessionByDuffelId(duffelSessionId) {
+  if (!requireDatabase()) return null;
+
   const result = await db.query(
     'SELECT * FROM link_sessions WHERE duffel_session_id = $1',
     [duffelSessionId]
@@ -87,6 +108,8 @@ async function getLinkSessionByDuffelId(duffelSessionId) {
 }
 
 async function updateLinkSessionStatus(duffelSessionId, status) {
+  if (!requireDatabase()) return null;
+
   const result = await db.query(
     `UPDATE link_sessions
      SET status = $2
@@ -98,6 +121,8 @@ async function updateLinkSessionStatus(duffelSessionId, status) {
 }
 
 async function getLinkSessionsByConversation(conversationId) {
+  if (!requireDatabase()) return [];
+
   const result = await db.query(
     'SELECT * FROM link_sessions WHERE conversation_id = $1 ORDER BY created_at DESC',
     [conversationId]
@@ -110,6 +135,8 @@ async function getLinkSessionsByConversation(conversationId) {
  */
 
 async function createBooking(data) {
+  if (!requireDatabase()) return null;
+
   const {
     linkSessionId,
     conversationId,
@@ -153,6 +180,8 @@ async function createBooking(data) {
 }
 
 async function getBookingByDuffelOrderId(duffelOrderId) {
+  if (!requireDatabase()) return null;
+
   const result = await db.query(
     'SELECT * FROM bookings WHERE duffel_order_id = $1',
     [duffelOrderId]
@@ -161,6 +190,8 @@ async function getBookingByDuffelOrderId(duffelOrderId) {
 }
 
 async function updateBookingStatus(duffelOrderId, status) {
+  if (!requireDatabase()) return null;
+
   const result = await db.query(
     `UPDATE bookings
      SET status = $2
@@ -172,6 +203,8 @@ async function updateBookingStatus(duffelOrderId, status) {
 }
 
 async function getBookingsByConversation(conversationId) {
+  if (!requireDatabase()) return [];
+
   const result = await db.query(
     'SELECT * FROM bookings WHERE conversation_id = $1 ORDER BY created_at DESC',
     [conversationId]
@@ -180,6 +213,8 @@ async function getBookingsByConversation(conversationId) {
 }
 
 async function getAllBookings(limit = 100) {
+  if (!requireDatabase()) return [];
+
   const result = await db.query(
     'SELECT * FROM bookings ORDER BY created_at DESC LIMIT $1',
     [limit]
@@ -192,6 +227,8 @@ async function getAllBookings(limit = 100) {
  */
 
 async function logEvent(eventType, entityType, entityId, payload) {
+  if (!requireDatabase()) return null;
+
   const result = await db.query(
     `INSERT INTO event_logs (event_type, entity_type, entity_id, payload)
      VALUES ($1, $2, $3, $4)
@@ -202,6 +239,8 @@ async function logEvent(eventType, entityType, entityId, payload) {
 }
 
 async function getEventLogs(options = {}) {
+  if (!requireDatabase()) return [];
+
   const { eventType, entityType, entityId, limit = 100 } = options;
 
   let query = 'SELECT * FROM event_logs WHERE 1=1';
@@ -238,6 +277,16 @@ async function getEventLogs(options = {}) {
  */
 
 async function getStats() {
+  if (!requireDatabase()) {
+    return {
+      conversations: 0,
+      linkSessions: 0,
+      bookings: 0,
+      totalRevenue: 0,
+      confirmedBookings: 0
+    };
+  }
+
   const [
     conversationsCount,
     linkSessionsCount,
