@@ -48,6 +48,11 @@ async function createFlightSession(params) {
   const { conversationId, phone, searchParams } = params;
 
   try {
+    // Check if Duffel is configured
+    if (!process.env.DUFFEL_ACCESS_TOKEN) {
+      throw new Error('DUFFEL_ACCESS_TOKEN not configured. Please add it to your environment variables.');
+    }
+
     console.log('Creating Duffel Links session:', {
       conversationId,
       phone,
