@@ -59,9 +59,14 @@ app.post('/webhook/elevenlabs/tool-call', webhookController.handleElevenLabsTool
 const duffelWebhookRouter = require('./routes/webhooks/duffel');
 app.use('/webhooks/duffel', duffelWebhookRouter);
 
-// Duffel Links routes
+// Duffel Links routes (legacy - being replaced)
 const linksRouter = require('./routes/links');
 app.use('/links', linksRouter);
+
+// Duffel Offers routes (new custom booking flow)
+const offersRouter = require('./routes/offers');
+app.use('/offers', offersRouter);
+app.use('/book', offersRouter); // For /book/:token endpoint
 
 // ARCHIVED: Old Flight search API endpoints (replaced by Duffel Links)
 app.post('/api/flights/search', async (req, res) => {
@@ -274,7 +279,12 @@ server.listen(PORT, '0.0.0.0', async () => {
   console.log('🧠 Using OpenAI model: ' + process.env.OPENAI_MODEL);
   console.log('🎙️ OpenAI Realtime API: ' + (realtimeService.isConfigured() ? 'Enabled' : 'Disabled'));
   console.log('✈️ Duffel API: ' + (duffelClient.isConfigured() ? `${duffelClient.getApiMode()} mode` : 'Not configured'));
-  console.log('🔗 Duffel Links: http://localhost:' + PORT + '/links/session');
+  console.log('🔗 Duffel Links (legacy): http://localhost:' + PORT + '/links/session');
+  console.log('🎫 Custom Booking Flow:');
+  console.log('   - Search flights: POST http://localhost:' + PORT + '/offers');
+  console.log('   - Create booking link: POST http://localhost:' + PORT + '/offers/booking-link');
+  console.log('   - Booking page: GET http://localhost:' + PORT + '/book/:token');
+  console.log('   - Create order: POST http://localhost:' + PORT + '/offers/orders');
   console.log('📥 Duffel Webhooks: http://localhost:' + PORT + '/webhooks/duffel');
 
   // Test database connection and run migrations

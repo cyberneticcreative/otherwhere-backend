@@ -273,6 +273,84 @@ async function getEventLogs(options = {}) {
 }
 
 /**
+ * BOOKING LINKS (Custom Duffel Offers flow)
+ */
+
+async function createBookingLink(data) {
+  if (!requireDatabase()) return null;
+
+  const {
+    tokenJti,
+    offerId,
+    accountId,
+    conversationId,
+    offerSnapshot,
+    expiresAt
+  } = data;
+
+  const result = await db.query(
+    `INSERT INTO booking_links
+     (token_jti, offer_id, account_id, conversation_id, offer_snapshot, expires_at, status)
+     VALUES ($1, $2, $3, $4, $5, $6, 'active')
+     RETURNING *`,
+    [
+      tokenJti,
+      offerId,
+      accountId,
+      conversationId,
+      JSON.stringify(offerSnapshot),
+      expiresAt
+    ]
+  );
+  return result.rows[0];
+}
+
+async function getBookingLinkByJti(tokenJti) {
+  if (!requireDatabase()) return null;
+
+  const result = await db.query(
+    'SELECT * FROM booking_links WHERE token_jti = $1',
+    [tokenJti]
+  );
+  return result.rows[0];
+}
+
+async function updateBookingLinkStatus(tokenJti, status) {
+  if (!requireDatabase()) return null;
+
+  const result = await db.query(
+    `UPDATE booking_links
+     SET status = $2
+     WHERE token_jti = $1
+     RETURNING *`,
+    [tokenJti, status]
+  );
+  return result.rows[0];
+}
+
+async function getBookingLinksByConversation(conversationId) {
+  if (!requireDatabase()) return [];
+
+  const result = await db.query(
+    'SELECT * FROM booking_links WHERE conversation_id = $1 ORDER BY created_at DESC',
+    [conversationId]
+  );
+  return result.rows;
+}
+
+async function cleanupExpiredBookingLinks() {
+  if (!requireDatabase()) return 0;
+
+  const result = await db.query(
+    `UPDATE booking_links
+     SET status = 'expired'
+     WHERE expires_at < NOW() AND status = 'active'
+     RETURNING id`
+  );
+  return result.rowCount;
+}
+
+/**
  * UTILITY QUERIES
  */
 
@@ -320,6 +398,13 @@ module.exports = {
   getLinkSessionByDuffelId,
   updateLinkSessionStatus,
   getLinkSessionsByConversation,
+
+  // Booking Links (Custom Duffel Offers flow)
+  createBookingLink,
+  getBookingLinkByJti,
+  updateBookingLinkStatus,
+  getBookingLinksByConversation,
+  cleanupExpiredBookingLinks,
 
   // Bookings
   createBooking,
