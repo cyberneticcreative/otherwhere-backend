@@ -3,7 +3,8 @@
  * Creates and manages Duffel Links sessions for hosted checkout
  */
 
-const { duffel, handleDuffelError } = require('./duffelClient');
+const axios = require('axios');
+const { handleDuffelError } = require('./duffelClient');
 const { logEvent } = require('../db/queries');
 
 /**
@@ -59,33 +60,45 @@ async function createFlightSession(params) {
       searchParams
     });
 
-    // Build session request
-    const sessionRequest = {
-      type: 'flights',
-      brand: BRAND_CONFIG,
-      markup: FEE_CONFIG,
-      ...REDIRECT_URLS,
-      metadata: {
-        conversation_id: conversationId,
-        user_phone: phone,
-        search_params: JSON.stringify(searchParams)
+    // Build session request per Duffel Links v2 API
+    const requestBody = {
+      data: {
+        reference: phone || `session_${Date.now()}`,
+        success_url: REDIRECT_URLS.success_url,
+        failure_url: REDIRECT_URLS.failure_url,
+        abandonment_url: REDIRECT_URLS.cancel_url,
+        primary_color: BRAND_CONFIG.primary_color,
+        logo_url: BRAND_CONFIG.logo_url,
+        markup_rate: FEE_CONFIG.amount, // 2.00 = 2%
+        flights: { enabled: true },
+        stays: { enabled: false }
       }
     };
 
-    // Create session via Duffel API
-    const session = await duffel.links.sessions.create(sessionRequest);
+    // Create session via Duffel REST API
+    const response = await axios.post(
+      'https://api.duffel.com/links/sessions',
+      requestBody,
+      {
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+          'Duffel-Version': 'v2',
+          'Authorization': `Bearer ${process.env.DUFFEL_ACCESS_TOKEN}`
+        }
+      }
+    );
+
+    const session = response.data.data;
 
     console.log('✅ Duffel session created:', {
-      sessionId: session.id,
-      url: session.url,
-      expiresAt: session.expires_at
+      url: session.url
     });
 
     // Log event (optional, only if database available)
     if (conversationId) {
       try {
         await logEvent('link_session_created', 'link_session', conversationId, {
-          duffel_session_id: session.id,
           session_url: session.url,
           search_params: searchParams
         });
@@ -95,20 +108,20 @@ async function createFlightSession(params) {
     }
 
     return {
-      id: session.id,
+      id: `session_${Date.now()}`, // Links v2 doesn't return an ID
       url: session.url,
-      expires_at: session.expires_at,
-      metadata: session.metadata
+      expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), // 24 hours
+      metadata: { phone, searchParams }
     };
 
   } catch (error) {
-    console.error('Failed to create Duffel Links session:', error);
+    console.error('Failed to create Duffel Links session:', error.response?.data || error.message);
 
     // Try to log failure (optional)
     if (conversationId) {
       try {
         await logEvent('link_session_failed', 'link_session', conversationId, {
-          error: error.message,
+          error: error.response?.data || error.message,
           search_params: searchParams
         });
       } catch (logError) {
@@ -116,7 +129,8 @@ async function createFlightSession(params) {
       }
     }
 
-    throw new Error(handleDuffelError(error, 'Create Links session'));
+    const errorMessage = error.response?.data?.errors?.[0]?.message || error.message;
+    throw new Error(`Duffel Links error: ${errorMessage}`);
   }
 }
 
