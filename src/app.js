@@ -277,13 +277,20 @@ server.listen(PORT, '0.0.0.0', async () => {
   console.log('🔗 Duffel Links: http://localhost:' + PORT + '/links/session');
   console.log('📥 Duffel Webhooks: http://localhost:' + PORT + '/webhooks/duffel');
 
-  // Test database connection
+  // Test database connection and run migrations
   if (process.env.DATABASE_URL) {
     try {
       const db = require('./db');
-      await db.testConnection();
+      const connected = await db.testConnection();
+
+      if (connected) {
+        console.log('🗃️  Running database migrations...');
+        await db.runMigrations();
+        console.log('✅ Database ready');
+      }
     } catch (error) {
-      console.error('⚠️ Database connection failed:', error.message);
+      console.error('⚠️ Database setup failed:', error.message);
+      console.error('   App will continue without database features');
     }
   } else {
     console.log('⚠️ DATABASE_URL not set - database features disabled');
