@@ -1,7 +1,7 @@
 const twilioService = require('../services/twilioService');
 const sessionManager = require('../services/sessionManager');
 const elevenLabsService = require('../services/elevenLabsService');
-const duffelLinksService = require('../services/duffelLinksService');
+const airlineDeeplinksService = require('../services/airlineDeeplinksService');
 const airbnbService = require('../services/airbnbService');
 const { getOrCreateConversation, createLinkSession } = require('../db/queries');
 
