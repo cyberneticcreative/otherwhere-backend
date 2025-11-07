@@ -1,7 +1,7 @@
 const OpenAI = require('openai');
-const duffelLinksService = require('./duffelLinksService');
+const duffelFlightsService = require('./duffelFlightsService');
+const airlineDeepLinksService = require('./airlineDeepLinksService');
 const airbnbService = require('./airbnbService');
-const { getOrCreateConversation, createLinkSession } = require('../db/queries');
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
@@ -212,68 +212,87 @@ class AssistantService {
                 } : null
               };
 
-              // CREATE DUFFEL LINKS SESSION for flight booking
+              // SEARCH FLIGHTS using Duffel API and create airline deeplinks
               try {
                 const flightSearchStart = Date.now();
-                console.log('🛫 Creating Duffel Links session...');
+                console.log('🛫 Searching flights via Duffel API...');
 
-                // Note: We need a phone number from the context to create a conversation
-                // For now, we'll return a message to the assistant that a link will be sent
-                // The actual link creation will happen when the user responds via SMS
-
-                // Normalize search parameters for Duffel
-                const searchParams = duffelLinksService.normalizeSearchParams({
-                  origin: tripSearchData.origin,
-                  destination: tripSearchData.destination,
-                  departure_date: tripSearchData.startDate,
-                  return_date: tripSearchData.endDate,
+                // Search flights using Duffel
+                const searchResults = await duffelFlightsService.searchFlights({
+                  origin: tripSearchData.origin.toUpperCase(),
+                  destination: tripSearchData.destination.toUpperCase(),
+                  departureDate: tripSearchData.startDate,
+                  returnDate: tripSearchData.endDate,
                   passengers: parseInt(tripSearchData.travelers) || 1,
-                  cabin_class: 'economy'
+                  cabin: 'economy'
                 });
 
-                // Validate search parameters
-                const validation = duffelLinksService.validateSearchParams(searchParams);
-                if (!validation.valid) {
-                  throw new Error(`Missing required parameters: ${validation.missing.join(', ')}`);
+                if (!searchResults.success || searchResults.offers.length === 0) {
+                  throw new Error('No flights found for your search');
                 }
 
-                // Store flight search parameters for SMS handler to pick up
+                // Format top 3 offers
+                const formattedFlights = duffelFlightsService.formatOffers(searchResults.offers, 3);
+
+                // Build airline deeplinks for each flight
+                const flightsWithLinks = formattedFlights.map(flight => {
+                  const bookingData = airlineDeepLinksService.buildBookingURL({
+                    airlineCode: flight.airline.iata_code,
+                    origin: tripSearchData.origin.toUpperCase(),
+                    destination: tripSearchData.destination.toUpperCase(),
+                    departure: tripSearchData.startDate,
+                    return: tripSearchData.endDate,
+                    passengers: parseInt(tripSearchData.travelers) || 1,
+                    cabin: 'economy'
+                  });
+
+                  return {
+                    ...flight,
+                    bookingUrl: bookingData.url,
+                    bookingSource: bookingData.source
+                  };
+                });
+
+                // Store flight results for SMS handler
                 flightResults = {
-                  flights: [{ /* Placeholder for compatibility */ }],
-                  originCode: searchParams.origin,
-                  destCode: searchParams.destination,
+                  flights: flightsWithLinks,
+                  originCode: tripSearchData.origin.toUpperCase(),
+                  destCode: tripSearchData.destination.toUpperCase(),
                   searchParams: {
-                    outboundDate: searchParams.departure_date,
-                    returnDate: searchParams.return_date,
-                    passengers: searchParams.passengers,
-                    cabinClass: searchParams.cabin_class
+                    outboundDate: tripSearchData.startDate,
+                    returnDate: tripSearchData.endDate,
+                    passengers: parseInt(tripSearchData.travelers) || 1,
+                    cabinClass: 'economy'
                   }
                 };
 
-                // Return success message to assistant
-                const resultsMessage = `${dateWarning}Great! I'll send you a booking link for flights from ${searchParams.origin} to ${searchParams.destination}. You'll be able to browse all available flights and book directly through our secure checkout.`;
+                // Format message for assistant
+                const bestFlight = flightsWithLinks[0];
+                const resultsMessage = `${dateWarning}Perfect! I found ${flightsWithLinks.length} flights from ${tripSearchData.origin} to ${tripSearchData.destination}. Best option: ${bestFlight.airline.name} for $${Math.round(bestFlight.price)} (${bestFlight.duration.text}, ${bestFlight.stops === 0 ? 'Direct' : `${bestFlight.stops} stop${bestFlight.stops > 1 ? 's' : ''}`}). Check your texts for all options with direct booking links!`;
 
                 toolOutputs.push({
                   tool_call_id: toolCall.id,
                   output: JSON.stringify({
                     success: true,
                     message: resultsMessage,
-                    searchParams: searchParams
+                    flightCount: flightsWithLinks.length,
+                    bestPrice: Math.round(bestFlight.price),
+                    airline: bestFlight.airline.name
                   })
                 });
 
                 const flightSearchDuration = Date.now() - flightSearchStart;
-                console.log(`✅ Duffel Links session prepared in ${flightSearchDuration}ms`);
+                console.log(`✅ Found ${flightsWithLinks.length} flights with airline deeplinks in ${flightSearchDuration}ms`);
 
               } catch (error) {
-                console.error('❌ Duffel Links preparation error:', error.message);
+                console.error('❌ Duffel flight search error:', error.message);
 
                 // Return error to assistant
                 toolOutputs.push({
                   tool_call_id: toolCall.id,
                   output: JSON.stringify({
                     success: false,
-                    message: 'Unable to prepare flight booking at the moment. Please try again or check city names.'
+                    message: 'Unable to find flights at the moment. Please try different cities or dates, or check the spelling of city names.'
                   })
                 });
               }

@@ -2,9 +2,8 @@ const twilioService = require('../services/twilioService');
 const llmService = require('../services/llmService');
 const assistantService = require('../services/assistantService');
 const sessionManager = require('../services/sessionManager');
-const duffelLinksService = require('../services/duffelLinksService');
+const airlineDeepLinksService = require('../services/airlineDeepLinksService');
 const airbnbService = require('../services/airbnbService');
-const { getOrCreateConversation, createLinkSession } = require('../db/queries');
 
 class SMSController {
   /**
@@ -177,89 +176,62 @@ class SMSController {
       const smsDuration = Date.now() - smsStartTime;
       console.log(`⏱️  SMS send took ${smsDuration}ms`);
 
-      // If we have flight results, create a Duffel Links session
+      // If we have flight results, send them with airline deeplinks
       if (flightResults && flightResults.flights && flightResults.flights.length > 0) {
-        console.log('✈️ Creating Duffel Links session for flight search...');
+        console.log('✈️ Sending flight results with airline deeplinks...');
 
         try {
-          // Normalize search parameters for Duffel
-          const searchParams = duffelLinksService.normalizeSearchParams({
-            origin: flightResults.originCode,
-            destination: flightResults.destCode,
-            departure_date: flightResults.searchParams?.outboundDate,
-            return_date: flightResults.searchParams?.returnDate,
-            passengers: flightResults.searchParams?.passengers || 1,
-            cabin_class: flightResults.searchParams?.cabinClass || 'economy'
+          // Format SMS message with flight options and airline deeplinks
+          const flightMessage = airlineDeepLinksService.formatSMSWithLinks(
+            flightResults.flights,
+            {
+              origin: flightResults.originCode,
+              destination: flightResults.destCode,
+              departure: flightResults.searchParams?.outboundDate,
+              returnDate: flightResults.searchParams?.returnDate,
+              passengers: flightResults.searchParams?.passengers || 1,
+              cabin: flightResults.searchParams?.cabinClass || 'economy'
+            }
+          );
+
+          // Store flight results in session for reference
+          await sessionManager.updateSession(from, {
+            lastFlightResults: flightResults.flights,
+            context: {
+              lastFlightSearch: {
+                origin: flightResults.originCode,
+                destination: flightResults.destCode,
+                startDate: flightResults.searchParams?.outboundDate,
+                endDate: flightResults.searchParams?.returnDate,
+                passengers: flightResults.searchParams?.passengers,
+                results: flightResults.flights
+              }
+            }
           });
 
-          // Try to get conversation from database (optional)
-          let conversationId = null;
-          try {
-            const conversation = await getOrCreateConversation(from, 'browse', searchParams);
-            conversationId = conversation?.id || null;
-            if (conversationId) {
-              console.log('✅ Conversation tracked:', conversationId);
-            }
-          } catch (dbError) {
-            console.warn('⚠️ Database unavailable, continuing without tracking:', dbError.message);
-          }
-
-          // Create Duffel Links session (works with or without conversationId)
-          const session = await duffelLinksService.createFlightSession({
-            conversationId: conversationId,
-            phone: from,
-            searchParams: searchParams
-          });
-
-          // Try to store session in database (optional)
-          if (conversationId) {
-            try {
-              await createLinkSession({
-                conversationId: conversationId,
-                duffelSessionId: session.id,
-                sessionUrl: session.url,
-                expiresAt: session.expires_at,
-                searchParams: searchParams
-              });
-              console.log('✅ Session tracked in database');
-            } catch (dbError) {
-              console.warn('⚠️ Could not track session in database:', dbError.message);
-            }
-          }
-
-          console.log('✅ Duffel Links session created:', session.id);
-
-          // Format SMS message with Links URL
-          const flightMessage = duffelLinksService.formatLinksSMS({
-            sessionUrl: session.url,
-            searchParams: searchParams,
-            expiresAt: session.expires_at
-          });
-
-          // Send Links URL as a second SMS (after a brief delay for better UX)
-          setTimeout(async () => {
-            try {
-              await twilioService.sendLongSMS(from, flightMessage);
-              console.log('✅ Duffel Links SMS sent');
-            } catch (smsError) {
-              console.error('❌ Failed to send Duffel Links SMS:', smsError);
-            }
-          }, 2000); // 2 second delay
+          // Send flight results as a second SMS (no delay needed, async send)
+          twilioService.sendLongSMS(from, flightMessage)
+            .then(() => {
+              console.log('✅ Flight results with airline deeplinks sent');
+            })
+            .catch((smsError) => {
+              console.error('❌ Failed to send flight results SMS:', smsError);
+            });
 
         } catch (error) {
-          console.error('❌ Failed to create Duffel Links session:', error);
+          console.error('❌ Failed to send flight results:', error);
 
           // Send fallback message
-          setTimeout(async () => {
-            try {
-              await twilioService.sendSMS(
-                from,
-                "I found flights but had trouble creating your booking link. Please try again or contact support."
-              );
-            } catch (smsError) {
+          twilioService.sendSMS(
+            from,
+            "I found flights but had trouble sending you the details. Please try again or contact support."
+          )
+            .then(() => {
+              console.log('✅ Error fallback SMS sent');
+            })
+            .catch((smsError) => {
               console.error('❌ Failed to send error message:', smsError);
-            }
-          }, 2000);
+            });
         }
       }
 
@@ -289,17 +261,14 @@ class SMSController {
           }
         );
 
-        // Send accommodation details as a second SMS (after a brief delay for better UX)
-        // Delay more if we also sent flight results
-        const delay = flightResults ? 4000 : 2000;
-        setTimeout(async () => {
-          try {
-            await twilioService.sendLongSMS(from, accommodationMessage);
+        // Send accommodation details as a second SMS (async)
+        twilioService.sendLongSMS(from, accommodationMessage)
+          .then(() => {
             console.log('✅ Accommodation results SMS sent');
-          } catch (smsError) {
+          })
+          .catch((smsError) => {
             console.error('❌ Failed to send accommodation results SMS:', smsError);
-          }
-        }, delay);
+          });
       }
 
       // Send TwiML response to Twilio

@@ -1,9 +1,9 @@
 const twilioService = require('../services/twilioService');
 const sessionManager = require('../services/sessionManager');
 const elevenLabsService = require('../services/elevenLabsService');
-const duffelLinksService = require('../services/duffelLinksService');
+const duffelFlightsService = require('../services/duffelFlightsService');
+const airlineDeepLinksService = require('../services/airlineDeepLinksService');
 const airbnbService = require('../services/airbnbService');
-const { getOrCreateConversation, createLinkSession } = require('../db/queries');
 
 class WebhookController {
   /**
@@ -191,95 +191,103 @@ class WebhookController {
         const phoneNumber = metadata?.phone_number || metadata?.from;
 
         try {
-          // Create Duffel Links session for flights
-          console.log(`[Duffel] Creating booking session: ${origin} → ${destination} on ${correctedCheckIn}`);
+          // Search flights using Duffel API with airline deeplinks
+          console.log(`[DuffelFlights] Searching flights: ${origin} → ${destination} on ${correctedCheckIn}`);
 
-          // Normalize search parameters for Duffel
-          const searchParams = duffelLinksService.normalizeSearchParams({
-            origin: origin,
-            destination: destination,
-            departure_date: correctedCheckIn,
-            return_date: correctedCheckOut,
+          // Search flights using Duffel
+          const searchResults = await duffelFlightsService.searchFlights({
+            origin: origin.toUpperCase(),
+            destination: destination.toUpperCase(),
+            departureDate: correctedCheckIn,
+            returnDate: correctedCheckOut,
             passengers: parseInt(travelers) || 1,
-            cabin_class: 'economy'
+            cabin: 'economy'
           });
 
-          // Validate search parameters
-          const validation = duffelLinksService.validateSearchParams(searchParams);
-          if (!validation.valid) {
-            throw new Error(`Missing required parameters: ${validation.missing.join(', ')}`);
+          if (!searchResults.success || searchResults.offers.length === 0) {
+            throw new Error('No flights found for your search');
           }
 
-          // Get or create conversation in database
-          const conversation = await getOrCreateConversation(
-            phoneNumber,
-            'browse',
-            searchParams
+          // Format top 3 offers
+          const formattedFlights = duffelFlightsService.formatOffers(searchResults.offers, 3);
+
+          // Build airline deeplinks for each flight
+          const flightsWithLinks = formattedFlights.map(flight => {
+            const bookingData = airlineDeepLinksService.buildBookingURL({
+              airlineCode: flight.airline.iata_code,
+              origin: origin.toUpperCase(),
+              destination: destination.toUpperCase(),
+              departure: correctedCheckIn,
+              return: correctedCheckOut,
+              passengers: parseInt(travelers) || 1,
+              cabin: 'economy'
+            });
+
+            return {
+              ...flight,
+              bookingUrl: bookingData.url,
+              bookingSource: bookingData.source
+            };
+          });
+
+          // Format SMS message with flight options and airline deeplinks
+          const smsMessage = airlineDeepLinksService.formatSMSWithLinks(
+            flightsWithLinks,
+            {
+              origin: origin.toUpperCase(),
+              destination: destination.toUpperCase(),
+              departure: correctedCheckIn,
+              returnDate: correctedCheckOut,
+              passengers: parseInt(travelers) || 1,
+              cabin: 'economy'
+            }
           );
-
-          // Create Duffel Links session
-          const session = await duffelLinksService.createFlightSession({
-            conversationId: conversation.id,
-            phone: phoneNumber,
-            searchParams: searchParams
-          });
-
-          // Store session in database
-          await createLinkSession({
-            conversationId: conversation.id,
-            duffelSessionId: session.id,
-            sessionUrl: session.url,
-            expiresAt: session.expires_at,
-            searchParams: searchParams
-          });
-
-          console.log('✅ Duffel Links session created:', session.id);
-
-          // Format SMS message with booking link
-          const smsMessage = duffelLinksService.formatLinksSMS({
-            sessionUrl: session.url,
-            searchParams: searchParams,
-            expiresAt: session.expires_at
-          });
 
           // Save to session for tracking
           if (phoneNumber) {
             await sessionManager.updateSession(phoneNumber, {
               tripDetails,
+              lastFlightResults: flightsWithLinks,
               context: {
                 conversationId: conversation_id,
-                lastDuffelSession: {
-                  sessionId: session.id,
-                  sessionUrl: session.url,
-                  searchParams: searchParams
+                lastFlightSearch: {
+                  origin,
+                  destination,
+                  originCode: origin.toUpperCase(),
+                  destCode: destination.toUpperCase(),
+                  startDate: correctedCheckIn,
+                  endDate: correctedCheckOut,
+                  travelers,
+                  results: flightsWithLinks
                 },
                 tripSearchInitiated: true,
                 tripSearchTimestamp: new Date().toISOString()
               }
             });
 
-            // Send SMS with Duffel Links URL
+            // Send SMS with flight results and booking links
             await twilioService.sendLongSMS(phoneNumber, smsMessage);
-            console.log(`✅ Sent Duffel booking link via SMS to ${phoneNumber}`);
+            console.log(`✅ Sent flight results with airline deeplinks via SMS to ${phoneNumber}`);
           }
 
           // Return success response to ElevenLabs
+          const bestFlight = flightsWithLinks[0];
           res.json({
             result: phoneNumber
-              ? `${dateWarning}Perfect! I've created a booking link for flights from ${origin} to ${destination}. Check your texts for the link to browse and book flights.`
-              : `${dateWarning}I've found flights from ${origin} to ${destination}. You can browse options and book directly.`,
+              ? `${dateWarning}Perfect! I found ${flightsWithLinks.length} flights from ${origin} to ${destination}. Best option: ${bestFlight.airline.name} for $${Math.round(bestFlight.price)}. Check your texts for all options with direct booking links!`
+              : `${dateWarning}I found ${flightsWithLinks.length} flights from ${origin} to ${destination}. The best option is ${bestFlight.airline.name} for $${Math.round(bestFlight.price)} (${bestFlight.duration.text}).`,
             success: true
           });
 
         } catch (searchError) {
-          console.error('Duffel Links creation error:', searchError);
+          console.error('Duffel flight search error:', searchError);
 
           // Send error message via SMS if phone available
           if (phoneNumber) {
             try {
               await twilioService.sendSMS(
                 phoneNumber,
-                `Sorry, I had trouble creating your booking link for ${origin} to ${destination}. Please try again or contact support.`
+                `Sorry, I had trouble finding flights from ${origin} to ${destination}. Please try different cities or dates.`
               );
             } catch (smsError) {
               console.error('Failed to send error SMS:', smsError);
@@ -287,7 +295,7 @@ class WebhookController {
           }
 
           res.json({
-            result: `I'm having trouble creating a booking link for ${origin} to ${destination} right now. Could you try again in a moment?`,
+            result: `I'm having trouble finding flights from ${origin} to ${destination} right now. Could you try different cities or check the spelling?`,
             success: false,
             error: searchError.message
           });
