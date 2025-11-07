@@ -1,5 +1,4 @@
 const OpenAI = require('openai');
-const duffelLinksService = require('./duffelLinksService');
 const airbnbService = require('./airbnbService');
 const { getOrCreateConversation, createLinkSession } = require('../db/queries');
 
@@ -212,61 +211,41 @@ class AssistantService {
                 } : null
               };
 
-              // CREATE DUFFEL LINKS SESSION for flight booking
+              // PREPARE FLIGHT SEARCH for airline deep links
               try {
                 const flightSearchStart = Date.now();
-                console.log('🛫 Creating Duffel Links session...');
-
-                // Note: We need a phone number from the context to create a conversation
-                // For now, we'll return a message to the assistant that a link will be sent
-                // The actual link creation will happen when the user responds via SMS
-
-                // Normalize search parameters for Duffel
-                const searchParams = duffelLinksService.normalizeSearchParams({
-                  origin: tripSearchData.origin,
-                  destination: tripSearchData.destination,
-                  departure_date: tripSearchData.startDate,
-                  return_date: tripSearchData.endDate,
-                  passengers: parseInt(tripSearchData.travelers) || 1,
-                  cabin_class: 'economy'
-                });
-
-                // Validate search parameters
-                const validation = duffelLinksService.validateSearchParams(searchParams);
-                if (!validation.valid) {
-                  throw new Error(`Missing required parameters: ${validation.missing.join(', ')}`);
-                }
+                console.log('🛫 Preparing flight search with airline deep links...');
 
                 // Store flight search parameters for SMS handler to pick up
                 flightResults = {
                   flights: [{ /* Placeholder for compatibility */ }],
-                  originCode: searchParams.origin,
-                  destCode: searchParams.destination,
+                  originCode: tripSearchData.origin,
+                  destCode: tripSearchData.destination,
                   searchParams: {
-                    outboundDate: searchParams.departure_date,
-                    returnDate: searchParams.return_date,
-                    passengers: searchParams.passengers,
-                    cabinClass: searchParams.cabin_class
+                    outboundDate: tripSearchData.startDate,
+                    returnDate: tripSearchData.endDate,
+                    passengers: parseInt(tripSearchData.travelers) || 1,
+                    cabinClass: 'economy'
                   }
                 };
 
                 // Return success message to assistant
-                const resultsMessage = `${dateWarning}Great! I'll send you a booking link for flights from ${searchParams.origin} to ${searchParams.destination}. You'll be able to browse all available flights and book directly through our secure checkout.`;
+                const resultsMessage = `${dateWarning}Perfect! I'll search for flights from ${tripSearchData.origin} to ${tripSearchData.destination} and send you direct booking links to the airlines' websites.`;
 
                 toolOutputs.push({
                   tool_call_id: toolCall.id,
                   output: JSON.stringify({
                     success: true,
                     message: resultsMessage,
-                    searchParams: searchParams
+                    searchParams: flightResults.searchParams
                   })
                 });
 
                 const flightSearchDuration = Date.now() - flightSearchStart;
-                console.log(`✅ Duffel Links session prepared in ${flightSearchDuration}ms`);
+                console.log(`✅ Flight search prepared in ${flightSearchDuration}ms`);
 
               } catch (error) {
-                console.error('❌ Duffel Links preparation error:', error.message);
+                console.error('❌ Flight search preparation error:', error.message);
 
                 // Return error to assistant
                 toolOutputs.push({

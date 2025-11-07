@@ -59,9 +59,9 @@ app.post('/webhook/elevenlabs/tool-call', webhookController.handleElevenLabsTool
 const duffelWebhookRouter = require('./routes/webhooks/duffel');
 app.use('/webhooks/duffel', duffelWebhookRouter);
 
-// Duffel Links routes
-const linksRouter = require('./routes/links');
-app.use('/links', linksRouter);
+// ARCHIVED: Duffel Links routes (Duffel Links feature sunsetted)
+// const linksRouter = require('./routes/links');
+// app.use('/links', linksRouter);
 
 // Flight search with airline deep links
 const flightsRouter = require('./routes/flights');
@@ -278,7 +278,6 @@ server.listen(PORT, '0.0.0.0', async () => {
   console.log('🧠 Using OpenAI model: ' + process.env.OPENAI_MODEL);
   console.log('🎙️ OpenAI Realtime API: ' + (realtimeService.isConfigured() ? 'Enabled' : 'Disabled'));
   console.log('✈️ Duffel API: ' + (duffelClient.isConfigured() ? `${duffelClient.getApiMode()} mode` : 'Not configured'));
-  console.log('🔗 Duffel Links: http://localhost:' + PORT + '/links/session');
   console.log('📥 Duffel Webhooks: http://localhost:' + PORT + '/webhooks/duffel');
   console.log('✈️  Flight Search API: http://localhost:' + PORT + '/flights/search');
 
