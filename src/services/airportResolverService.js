@@ -122,7 +122,15 @@ class AirportResolverService {
       throw new Error('Location is required');
     }
 
-    const normalized = location.toLowerCase().trim();
+    let normalized = location.toLowerCase().trim();
+
+    // Smart preprocessing: Remove " city" suffix if present
+    // "New York City" → "new york"
+    // "San Francisco City" → "san francisco"
+    if (normalized.endsWith(' city')) {
+      normalized = normalized.slice(0, -5).trim();
+      console.log(`[AirportResolver] Removed " city" suffix: "${location}" → "${normalized}"`);
+    }
 
     // FIRST: Check if it's in our commonAirports mapping (handles city names AND city codes like "NYC")
     const airports = this.commonAirports[normalized];
