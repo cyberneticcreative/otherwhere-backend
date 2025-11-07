@@ -1,7 +1,6 @@
 {
   "AC": "https://www.aircanada.com/en-ca/flights-to-{destination}?origin={origin}&destination={destination}&departureDate={departure}&returnDate={return}&adults={passengers}",
   "DL": "https://www.delta.com/flight-search/book-a-flight?tripType=ROUND_TRIP&fromCity={origin}&toCity={destination}&departureDate={departure}&returnDate={return}&passengers={passengers}",
-  "AA": "https://www.aa.com/booking/flights?tripType=roundTrip&from={origin}&to={destination}&departDate={departure}&returnDate={return}&adultPassengersCount={passengers}",
   "UA": "https://www.united.com/en/us/fsr/choose-flights?f={origin}&t={destination}&d={departure}&r={return}&px={passengers}&sc={cabin}",
   "WN": "https://www.southwest.com/air/booking/select.html?originationAirportCode={origin}&destinationAirportCode={destination}&returnAirportCode=&departureDate={departure}&departureTimeOfDay=ALL_DAY&returnDate={return}&returnTimeOfDay=ALL_DAY&adultPassengersCount={passengers}",
   "B6": "https://www.jetblue.com/booking/flights?from={origin}&to={destination}&depart={departure}&return={return}&isMultiCity=false&noOfRoute=1&lang=en&adults={passengers}",
