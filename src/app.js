@@ -63,6 +63,10 @@ app.use('/webhooks/duffel', duffelWebhookRouter);
 const linksRouter = require('./routes/links');
 app.use('/links', linksRouter);
 
+// Flight search with airline deep links
+const flightsRouter = require('./routes/flights');
+app.use('/flights', flightsRouter);
+
 // ARCHIVED: Old Flight search API endpoints (replaced by Duffel Links)
 app.post('/api/flights/search', async (req, res) => {
   try {
@@ -276,6 +280,7 @@ server.listen(PORT, '0.0.0.0', async () => {
   console.log('✈️ Duffel API: ' + (duffelClient.isConfigured() ? `${duffelClient.getApiMode()} mode` : 'Not configured'));
   console.log('🔗 Duffel Links: http://localhost:' + PORT + '/links/session');
   console.log('📥 Duffel Webhooks: http://localhost:' + PORT + '/webhooks/duffel');
+  console.log('✈️  Flight Search API: http://localhost:' + PORT + '/flights/search');
 
   // Test database connection and run migrations
   if (process.env.DATABASE_URL) {
