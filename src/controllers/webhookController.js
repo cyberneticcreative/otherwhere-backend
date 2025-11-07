@@ -3,6 +3,7 @@ const sessionManager = require('../services/sessionManager');
 const elevenLabsService = require('../services/elevenLabsService');
 const duffelFlightsService = require('../services/duffelFlightsService');
 const airlineDeepLinksService = require('../services/airlineDeepLinksService');
+const airportResolverService = require('../services/airportResolverService');
 const airbnbService = require('../services/airbnbService');
 
 class WebhookController {
@@ -194,10 +195,20 @@ class WebhookController {
           // Search flights using Duffel API with airline deeplinks
           console.log(`[DuffelFlights] Searching flights: ${origin} → ${destination} on ${correctedCheckIn}`);
 
+          // Resolve city names to IATA airport codes
+          let originCode, destCode;
+          try {
+            originCode = airportResolverService.resolveAirportCode(origin);
+            destCode = airportResolverService.resolveAirportCode(destination);
+            console.log(`[AirportResolver] ${origin} → ${originCode}, ${destination} → ${destCode}`);
+          } catch (resolveError) {
+            throw new Error(`${resolveError.message} Please specify a major city or 3-letter airport code.`);
+          }
+
           // Search flights using Duffel
           const searchResults = await duffelFlightsService.searchFlights({
-            origin: origin.toUpperCase(),
-            destination: destination.toUpperCase(),
+            origin: originCode,
+            destination: destCode,
             departureDate: correctedCheckIn,
             returnDate: correctedCheckOut,
             passengers: parseInt(travelers) || 1,
@@ -215,8 +226,8 @@ class WebhookController {
           const flightsWithLinks = formattedFlights.map(flight => {
             const bookingData = airlineDeepLinksService.buildBookingURL({
               airlineCode: flight.airline.iata_code,
-              origin: origin.toUpperCase(),
-              destination: destination.toUpperCase(),
+              origin: originCode,
+              destination: destCode,
               departure: correctedCheckIn,
               return: correctedCheckOut,
               passengers: parseInt(travelers) || 1,
@@ -234,8 +245,8 @@ class WebhookController {
           const smsMessage = airlineDeepLinksService.formatSMSWithLinks(
             flightsWithLinks,
             {
-              origin: origin.toUpperCase(),
-              destination: destination.toUpperCase(),
+              origin: originCode,
+              destination: destCode,
               departure: correctedCheckIn,
               returnDate: correctedCheckOut,
               passengers: parseInt(travelers) || 1,
@@ -253,8 +264,8 @@ class WebhookController {
                 lastFlightSearch: {
                   origin,
                   destination,
-                  originCode: origin.toUpperCase(),
-                  destCode: destination.toUpperCase(),
+                  originCode: originCode,
+                  destCode: destCode,
                   startDate: correctedCheckIn,
                   endDate: correctedCheckOut,
                   travelers,

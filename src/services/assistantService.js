@@ -1,6 +1,7 @@
 const OpenAI = require('openai');
 const duffelFlightsService = require('./duffelFlightsService');
 const airlineDeepLinksService = require('./airlineDeepLinksService');
+const airportResolverService = require('./airportResolverService');
 const airbnbService = require('./airbnbService');
 
 const openai = new OpenAI({
@@ -217,10 +218,20 @@ class AssistantService {
                 const flightSearchStart = Date.now();
                 console.log('🛫 Searching flights via Duffel API...');
 
+                // Resolve city names to IATA airport codes
+                let originCode, destCode;
+                try {
+                  originCode = airportResolverService.resolveAirportCode(tripSearchData.origin);
+                  destCode = airportResolverService.resolveAirportCode(tripSearchData.destination);
+                  console.log(`[AirportResolver] ${tripSearchData.origin} → ${originCode}, ${tripSearchData.destination} → ${destCode}`);
+                } catch (resolveError) {
+                  throw new Error(`${resolveError.message} Please specify a major city or 3-letter airport code.`);
+                }
+
                 // Search flights using Duffel
                 const searchResults = await duffelFlightsService.searchFlights({
-                  origin: tripSearchData.origin.toUpperCase(),
-                  destination: tripSearchData.destination.toUpperCase(),
+                  origin: originCode,
+                  destination: destCode,
                   departureDate: tripSearchData.startDate,
                   returnDate: tripSearchData.endDate,
                   passengers: parseInt(tripSearchData.travelers) || 1,
@@ -238,8 +249,8 @@ class AssistantService {
                 const flightsWithLinks = formattedFlights.map(flight => {
                   const bookingData = airlineDeepLinksService.buildBookingURL({
                     airlineCode: flight.airline.iata_code,
-                    origin: tripSearchData.origin.toUpperCase(),
-                    destination: tripSearchData.destination.toUpperCase(),
+                    origin: originCode,
+                    destination: destCode,
                     departure: tripSearchData.startDate,
                     return: tripSearchData.endDate,
                     passengers: parseInt(tripSearchData.travelers) || 1,
@@ -256,8 +267,8 @@ class AssistantService {
                 // Store flight results for SMS handler
                 flightResults = {
                   flights: flightsWithLinks,
-                  originCode: tripSearchData.origin.toUpperCase(),
-                  destCode: tripSearchData.destination.toUpperCase(),
+                  originCode: originCode,
+                  destCode: destCode,
                   searchParams: {
                     outboundDate: tripSearchData.startDate,
                     returnDate: tripSearchData.endDate,
