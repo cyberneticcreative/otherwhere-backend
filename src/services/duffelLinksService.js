@@ -38,68 +38,54 @@ const REDIRECT_URLS = {
 };
 
 /**
- * Create a Duffel Links v2 session for flights
+ * Create a custom booking session (replaces deprecated Duffel Links)
+ * Generates a unique URL to your own hosted booking page
  * @param {Object} params - Session parameters
  * @param {string} params.conversationId - Conversation UUID
  * @param {string} params.phone - User's phone number
  * @param {Object} params.searchParams - Flight search parameters
- * @returns {Promise<Object>} Duffel session
+ * @returns {Promise<Object>} Booking session
  */
 async function createFlightSession(params) {
   const { conversationId, phone, searchParams } = params;
 
   try {
-    // Check if Duffel is configured
-    if (!process.env.DUFFEL_ACCESS_TOKEN) {
-      throw new Error('DUFFEL_ACCESS_TOKEN not configured. Please add it to your environment variables.');
-    }
-
-    console.log('Creating Duffel Links session:', {
+    console.log('Creating custom booking session:', {
       conversationId,
       phone,
       searchParams
     });
 
-    // Build session request per Duffel Links v2 API
-    const requestBody = {
-      data: {
-        reference: phone || `session_${Date.now()}`,
-        success_url: REDIRECT_URLS.success_url,
-        failure_url: REDIRECT_URLS.failure_url,
-        abandonment_url: REDIRECT_URLS.cancel_url,
-        primary_color: BRAND_CONFIG.primary_color,
-        logo_url: BRAND_CONFIG.logo_url,
-        markup_rate: FEE_CONFIG.amount, // 2.00 = 2%
-        flights: { enabled: true },
-        stays: { enabled: false }
-      }
-    };
+    // Generate unique session ID
+    const sessionId = `bk_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
-    // Create session via Duffel REST API
-    const response = await axios.post(
-      'https://api.duffel.com/links/sessions',
-      requestBody,
-      {
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json',
-          'Duffel-Version': 'v2',
-          'Authorization': `Bearer ${process.env.DUFFEL_ACCESS_TOKEN}`
-        }
-      }
-    );
+    // Build booking URL with search parameters
+    const baseUrl = process.env.BOOKING_PAGE_URL || 'https://otherwhere.app/book';
+    const queryParams = new URLSearchParams({
+      session: sessionId,
+      origin: searchParams.origin || '',
+      destination: searchParams.destination || '',
+      departure: searchParams.departure_date || '',
+      ...(searchParams.return_date && { return: searchParams.return_date }),
+      passengers: searchParams.passengers || 1,
+      cabin: searchParams.cabin_class || 'economy',
+      phone: phone || ''
+    });
 
-    const session = response.data.data;
+    const bookingUrl = `${baseUrl}?${queryParams.toString()}`;
+    const expiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString(); // 48 hours
 
-    console.log('✅ Duffel session created:', {
-      url: session.url
+    console.log('✅ Custom booking session created:', {
+      sessionId,
+      url: bookingUrl
     });
 
     // Log event (optional, only if database available)
     if (conversationId) {
       try {
-        await logEvent('link_session_created', 'link_session', conversationId, {
-          session_url: session.url,
+        await logEvent('booking_session_created', 'booking_session', conversationId, {
+          session_id: sessionId,
+          session_url: bookingUrl,
           search_params: searchParams
         });
       } catch (logError) {
@@ -108,20 +94,20 @@ async function createFlightSession(params) {
     }
 
     return {
-      id: `session_${Date.now()}`, // Links v2 doesn't return an ID
-      url: session.url,
-      expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), // 24 hours
+      id: sessionId,
+      url: bookingUrl,
+      expires_at: expiresAt,
       metadata: { phone, searchParams }
     };
 
   } catch (error) {
-    console.error('Failed to create Duffel Links session:', error.response?.data || error.message);
+    console.error('Failed to create booking session:', error.message);
 
     // Try to log failure (optional)
     if (conversationId) {
       try {
-        await logEvent('link_session_failed', 'link_session', conversationId, {
-          error: error.response?.data || error.message,
+        await logEvent('booking_session_failed', 'booking_session', conversationId, {
+          error: error.message,
           search_params: searchParams
         });
       } catch (logError) {
@@ -129,8 +115,7 @@ async function createFlightSession(params) {
       }
     }
 
-    const errorMessage = error.response?.data?.errors?.[0]?.message || error.message;
-    throw new Error(`Duffel Links error: ${errorMessage}`);
+    throw new Error(`Booking session error: ${error.message}`);
   }
 }
 
@@ -150,9 +135,9 @@ async function getSession(sessionId) {
 }
 
 /**
- * Format SMS message with Links URL
+ * Format SMS message with booking URL
  * @param {Object} params
- * @param {string} params.sessionUrl - Duffel Links URL
+ * @param {string} params.sessionUrl - Booking page URL
  * @param {Object} params.searchParams - Search parameters
  * @param {string} params.expiresAt - Session expiration
  * @returns {string} Formatted SMS message
@@ -161,30 +146,32 @@ function formatLinksSMS(params) {
   const { sessionUrl, searchParams, expiresAt } = params;
   const { origin, destination, departure_date, return_date } = searchParams;
 
-  let message = `✈️ Found flight options for you!\n\n`;
+  let message = `✈️ Ready to book your flights!\n\n`;
 
   if (origin && destination) {
-    message += `Route: ${origin} → ${destination}\n`;
+    message += `${origin} → ${destination}\n`;
   }
 
   if (departure_date) {
-    message += `Departure: ${departure_date}\n`;
+    message += `Departing: ${departure_date}\n`;
   }
 
   if (return_date) {
-    message += `Return: ${return_date}\n`;
+    message += `Returning: ${return_date}\n`;
   }
 
-  message += `\nBook securely here:\n${sessionUrl}\n\n`;
-  message += `Includes fare monitoring + rebooking support.\n`;
+  message += `\n📲 Book now:\n${sessionUrl}\n\n`;
+  message += `✓ Secure payment\n`;
+  message += `✓ Instant confirmation\n`;
+  message += `✓ 24/7 support included`;
 
   // Add expiration warning if within 24 hours
   if (expiresAt) {
     const expiryDate = new Date(expiresAt);
     const hoursUntilExpiry = (expiryDate - new Date()) / (1000 * 60 * 60);
 
-    if (hoursUntilExpiry < 24) {
-      message += `\n⏰ Link expires in ${Math.round(hoursUntilExpiry)} hours`;
+    if (hoursUntilExpiry < 48) {
+      message += `\n\n⏰ Link valid for ${Math.round(hoursUntilExpiry)} hours`;
     }
   }
 

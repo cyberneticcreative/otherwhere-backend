@@ -14,7 +14,8 @@ const isConfigured = !!process.env.DATABASE_URL;
 let pool = null;
 
 if (isConfigured) {
-  pool = new Pool({
+  // Parse DATABASE_URL and force IPv4 if needed
+  const connectionConfig = {
     connectionString: process.env.DATABASE_URL,
     ssl: process.env.NODE_ENV === 'production' ? {
       rejectUnauthorized: false
@@ -22,7 +23,28 @@ if (isConfigured) {
     max: 20, // Maximum number of clients in pool
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 2000,
-  });
+  };
+
+  // Force IPv4 by setting host family option
+  // This prevents IPv6 connection attempts that may fail with ENETUNREACH
+  if (process.env.DATABASE_URL) {
+    try {
+      const url = new URL(process.env.DATABASE_URL);
+      connectionConfig.host = url.hostname;
+      connectionConfig.port = url.port || 5432;
+      connectionConfig.database = url.pathname.slice(1);
+      connectionConfig.user = url.username;
+      connectionConfig.password = url.password;
+      delete connectionConfig.connectionString;
+
+      // Set host to prefer IPv4
+      process.env.NODE_OPTIONS = (process.env.NODE_OPTIONS || '') + ' --dns-result-order=ipv4first';
+    } catch (parseError) {
+      console.warn('Could not parse DATABASE_URL, using connectionString as-is');
+    }
+  }
+
+  pool = new Pool(connectionConfig);
 
   // Log pool errors
   pool.on('error', (err, client) => {
