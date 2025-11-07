@@ -170,14 +170,13 @@ class AirlineDeepLinksService {
         cabin: searchParams.cabin || 'economy'
       });
 
-      const bookingCTA = bookingData.source === 'airline'
-        ? `Book on ${airline.name}`
-        : `Search on Kayak`;
+      // Always use Kayak now (airline deep links are unreliable)
+      const bookingCTA = `Search on Kayak`;
 
       return `${index}. ${airline.name} ${priceDisplay}\n${duration.text} • ${stopsText}\n🔗 ${bookingCTA}: ${bookingData.url}`;
     }).join('\n\n');
 
-    const footer = `\n\nYou'll complete your booking on the airline's official site.`;
+    const footer = `\n\nKayak compares all airlines so you can find the best price.`;
 
     return `${header}${flightsList}${footer}`;
   }
