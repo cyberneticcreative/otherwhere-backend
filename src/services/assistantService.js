@@ -148,6 +148,9 @@ class AssistantService {
               const args = JSON.parse(toolCall.function.arguments);
               console.log(`🔍 search_trips called with:`, args);
 
+              // Extract cabin class if provided (economy, premium_economy, business, first)
+              const cabinClass = args.cabin_class || args.cabinClass || 'economy';
+
               // Fix dates if they're in the past (smart correction)
               const fixPastDate = (dateStr) => {
                 if (!dateStr) return null;
@@ -235,8 +238,10 @@ class AssistantService {
                   departureDate: tripSearchData.startDate,
                   returnDate: tripSearchData.endDate,
                   passengers: parseInt(tripSearchData.travelers) || 1,
-                  cabin: 'economy'
+                  cabin: cabinClass
                 });
+
+                console.log(`✈️  Searching ${cabinClass} class flights`);
 
                 if (!searchResults.success || searchResults.offers.length === 0) {
                   throw new Error('No flights found for your search');
@@ -254,7 +259,7 @@ class AssistantService {
                     departure: tripSearchData.startDate,
                     return: tripSearchData.endDate,
                     passengers: parseInt(tripSearchData.travelers) || 1,
-                    cabin: 'economy'
+                    cabin: cabinClass
                   });
 
                   return {
@@ -273,7 +278,7 @@ class AssistantService {
                     outboundDate: tripSearchData.startDate,
                     returnDate: tripSearchData.endDate,
                     passengers: parseInt(tripSearchData.travelers) || 1,
-                    cabinClass: 'economy'
+                    cabinClass: cabinClass
                   }
                 };
 

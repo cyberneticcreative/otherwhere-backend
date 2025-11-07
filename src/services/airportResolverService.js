@@ -124,18 +124,21 @@ class AirportResolverService {
 
     const normalized = location.toLowerCase().trim();
 
-    // If it's already a 3-letter IATA code, return it
-    if (/^[A-Z]{3}$/i.test(normalized)) {
-      return normalized.toUpperCase();
-    }
-
-    // Look up in commonAirports mapping
+    // FIRST: Check if it's in our commonAirports mapping (handles city names AND city codes like "NYC")
     const airports = this.commonAirports[normalized];
 
     if (airports && airports.length > 0) {
       // Return first airport code (primary airport for the city)
       const code = airports[0].code;
       console.log(`[AirportResolver] Resolved "${location}" → ${code}`);
+      return code;
+    }
+
+    // SECOND: If not in mapping and it looks like a 3-letter IATA code, assume it's valid
+    // This allows users to use actual IATA codes that aren't in our mapping
+    if (/^[A-Z]{3}$/i.test(normalized)) {
+      const code = normalized.toUpperCase();
+      console.log(`[AirportResolver] Assuming "${location}" is a valid IATA code: ${code}`);
       return code;
     }
 

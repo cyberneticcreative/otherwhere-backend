@@ -1,275 +1,208 @@
 /**
  * Airline Deep Links Service
- *
- * Combines Duffel flight search with airline-specific deep links.
- * Returns curated flight results with direct booking URLs.
+ * Builds direct booking URLs for specific airlines
+ * Includes fallback to Google Flights when airline pattern doesn't exist
  */
 
-const duffelFlightSearchService = require('./duffelFlightSearchService');
-const {
-  buildDeeplinkWithFallback,
-  getAirlineInfo,
-  isAirlineSupported,
-  getSupportedAirlines,
-  validateSearchParams
-} = require('../utils/deeplinksBuilder');
+const airlineDeepLinks = require('../data/airlineDeepLinks.json');
 
-/**
- * Search flights and return results with airline deep links
- *
- * @param {Object} searchParams - Flight search parameters
- * @param {string} searchParams.origin - Origin airport code
- * @param {string} searchParams.destination - Destination airport code
- * @param {string} searchParams.departure - Departure date (YYYY-MM-DD)
- * @param {string} searchParams.returnDate - Return date (YYYY-MM-DD), optional
- * @param {number} searchParams.passengers - Number of passengers
- * @param {string} searchParams.cabin - Cabin class
- * @param {number} limit - Maximum number of results (default: 3)
- * @returns {Promise<Object>} - Search results with deep links
- */
-async function searchFlightsWithDeeplinks(searchParams, limit = 3) {
-  // Validate parameters
-  const validation = validateSearchParams(searchParams);
-  if (!validation.valid) {
-    throw new Error(`Invalid search parameters: ${validation.errors.join(', ')}`);
+class AirlineDeepLinksService {
+  /**
+   * Build a booking URL for a specific airline
+   * @param {Object} params - URL parameters
+   * @param {string} params.airlineCode - IATA airline code (e.g., "AC", "DL")
+   * @param {string} params.origin - Origin airport code (e.g., "YVR")
+   * @param {string} params.destination - Destination airport code (e.g., "JFK")
+   * @param {string} params.departure - Departure date (YYYY-MM-DD)
+   * @param {string} [params.return] - Return date (YYYY-MM-DD), optional for one-way
+   * @param {number} [params.passengers=1] - Number of passengers
+   * @param {string} [params.cabin='economy'] - Cabin class
+   * @returns {string|null} Booking URL or null if pattern doesn't exist
+   */
+  buildAirlineLink(params) {
+    const {
+      airlineCode,
+      origin,
+      destination,
+      departure,
+      return: returnDate,
+      passengers = 1,
+      cabin = 'economy'
+    } = params;
+
+    // Check if we have a pattern for this airline
+    const template = airlineDeepLinks[airlineCode];
+
+    if (!template) {
+      console.log(`[AirlineDeepLinks] No pattern found for airline: ${airlineCode}`);
+      return null;
+    }
+
+    // Build the URL by replacing placeholders
+    let url = template
+      .replaceAll('{origin}', encodeURIComponent(origin))
+      .replaceAll('{destination}', encodeURIComponent(destination))
+      .replaceAll('{departure}', encodeURIComponent(departure))
+      .replaceAll('{passengers}', encodeURIComponent(passengers.toString()))
+      .replaceAll('{cabin}', encodeURIComponent(cabin));
+
+    // Handle return date (optional for one-way flights)
+    if (returnDate) {
+      url = url.replaceAll('{return}', encodeURIComponent(returnDate));
+    } else {
+      // Remove return date parameter if one-way
+      // This is a simple cleanup - airlines may have different formats
+      url = url.replace(/[&?]returnDate=[^&]*/g, '');
+      url = url.replace(/[&?]return=[^&]*/g, '');
+      url = url.replace(/[&?]inbound=[^&]*/g, '');
+      url = url.replace(/[&?]retDate=[^&]*/g, '');
+    }
+
+    console.log(`[AirlineDeepLinks] Built URL for ${airlineCode}: ${url}`);
+    return url;
   }
 
-  // Search flights using Duffel
-  const offers = await duffelFlightSearchService.searchFlights(searchParams, limit);
+  /**
+   * Build Google Flights fallback URL
+   * Used when airline-specific pattern doesn't exist
+   * @param {Object} params - URL parameters
+   * @param {string} params.origin - Origin airport code
+   * @param {string} params.destination - Destination airport code
+   * @param {string} params.departure - Departure date (YYYY-MM-DD)
+   * @param {string} [params.return] - Return date (YYYY-MM-DD)
+   * @returns {string} Google Flights URL
+   */
+  buildGoogleFlightsFallback(params) {
+    const { origin, destination, departure, return: returnDate } = params;
 
-  console.log(`Found ${offers.length} flight offers, building deep links...`);
+    if (returnDate) {
+      // Round trip
+      return `https://www.google.com/flights?hl=en#flt=${origin}.${destination}.${departure}*${destination}.${origin}.${returnDate}`;
+    } else {
+      // One-way
+      return `https://www.google.com/flights?hl=en#flt=${origin}.${destination}.${departure}`;
+    }
+  }
 
-  // Build deep links for each offer
-  const results = offers.map(offer => {
-    const airlineCode = offer.airline.code;
-    const linkData = buildDeeplinkWithFallback(airlineCode, searchParams);
+  /**
+   * Build booking URL with fallback
+   * Tries to build airline-specific URL, falls back to Google Flights if not available
+   * @param {Object} params - URL parameters
+   * @param {string} params.airlineCode - IATA airline code
+   * @param {string} params.origin - Origin airport code
+   * @param {string} params.destination - Destination airport code
+   * @param {string} params.departure - Departure date (YYYY-MM-DD)
+   * @param {string} [params.return] - Return date (YYYY-MM-DD)
+   * @param {number} [params.passengers=1] - Number of passengers
+   * @param {string} [params.cabin='economy'] - Cabin class
+   * @returns {Object} { url, source: 'airline' | 'google_flights' }
+   */
+  buildBookingURL(params) {
+    // Try airline-specific URL first
+    const airlineUrl = this.buildAirlineLink(params);
+
+    if (airlineUrl) {
+      return {
+        url: airlineUrl,
+        source: 'airline',
+        airline: params.airlineCode
+      };
+    }
+
+    // Fallback to Google Flights
+    const googleFlightsUrl = this.buildGoogleFlightsFallback(params);
+
+    console.log(`[AirlineDeepLinks] Using Google Flights fallback for ${params.airlineCode}`);
 
     return {
-      offerId: offer.offerId,
-      airline: {
-        code: airlineCode,
-        name: offer.airline.name,
-        logo: offer.airline.logo,
-        supportsDeeplink: isAirlineSupported(airlineCode)
-      },
-      price: {
-        amount: offer.totalAmount,
-        currency: offer.currency,
-        formatted: `${offer.currency} ${offer.totalAmount.toFixed(2)}`
-      },
-      duration: {
-        total: offer.totalDuration,
-        formatted: offer.durationFormatted
-      },
-      legs: offer.legs.map(leg => ({
-        departure: {
-          airport: leg.departure.airport,
-          city: leg.departure.city,
-          time: leg.departure.time,
-          timeFormatted: leg.departure.timeFormatted
-        },
-        arrival: {
-          airport: leg.arrival.airport,
-          city: leg.arrival.city,
-          time: leg.arrival.time,
-          timeFormatted: leg.arrival.timeFormatted
-        },
-        stops: leg.stops,
-        duration: leg.durationFormatted
-      })),
-      bookingLink: {
-        url: linkData.url,
-        provider: linkData.provider, // 'airline' or 'google'
-        ctaText: linkData.provider === 'airline'
-          ? `Book on ${offer.airline.name}`
-          : 'View on Google Flights'
-      }
+      url: googleFlightsUrl,
+      source: 'google_flights',
+      airline: params.airlineCode
     };
-  });
-
-  // Build response
-  return {
-    searchParams: {
-      origin: searchParams.origin.toUpperCase(),
-      destination: searchParams.destination.toUpperCase(),
-      departure: searchParams.departure,
-      returnDate: searchParams.returnDate,
-      passengers: searchParams.passengers,
-      cabin: searchParams.cabin || 'economy'
-    },
-    results,
-    meta: {
-      totalResults: results.length,
-      airlinesWithDeeplinks: results.filter(r => r.airline.supportsDeeplink).length,
-      currency: results[0]?.price.currency || 'USD',
-      searchedAt: new Date().toISOString()
-    }
-  };
-}
-
-/**
- * Get the best flight offer with deep link
- *
- * @param {Object} searchParams - Flight search parameters
- * @returns {Promise<Object>} - Best offer with deep link
- */
-async function getBestOffer(searchParams) {
-  const response = await searchFlightsWithDeeplinks(searchParams, 1);
-  return response.results[0] || null;
-}
-
-/**
- * Format flight results as SMS message
- *
- * @param {Object} searchResults - Results from searchFlightsWithDeeplinks
- * @param {boolean} includeLinks - Whether to include booking links (default: true)
- * @returns {string} - Formatted SMS message
- */
-function formatFlightResultsSMS(searchResults, includeLinks = true) {
-  const { searchParams, results } = searchResults;
-
-  if (!results || results.length === 0) {
-    return `No flights found for ${searchParams.origin} → ${searchParams.destination} on ${searchParams.departure}`;
   }
 
-  let message = `✈️ Flights ${searchParams.origin} → ${searchParams.destination}\n`;
-  message += `${duffelFlightSearchService.formatDate(searchParams.departure)}`;
+  /**
+   * Format SMS message with flight options and booking links
+   * @param {Array} flights - Formatted flight data from Duffel
+   * @param {Object} searchParams - Original search parameters
+   * @returns {string} SMS message
+   */
+  formatSMSWithLinks(flights, searchParams) {
+    if (!flights || flights.length === 0) {
+      return 'Sorry, no flights found for your search. Try different dates or airports.';
+    }
 
-  if (searchParams.returnDate) {
-    message += ` - ${duffelFlightSearchService.formatDate(searchParams.returnDate)}`;
+    const { origin, destination } = searchParams;
+    // Support both 'departure' and 'departureDate' for flexibility
+    const departure = searchParams.departure || searchParams.departureDate;
+
+    // Format date as MM/DD
+    const formatDate = (dateStr) => {
+      if (!dateStr) return '';
+      const [year, month, day] = dateStr.split('-');
+      return `${month}/${day}`;
+    };
+
+    const dateDisplay = formatDate(departure);
+    const header = `✈️ ${origin}→${destination} ${dateDisplay}\n\n`;
+
+    const flightsList = flights.map(flight => {
+      const { index, airline, price, currency, duration, stops } = flight;
+
+      // Format price
+      const priceDisplay = `$${Math.round(price)}`;
+
+      // Format stops
+      const stopsText = stops === 0 ? 'Direct' : `${stops} stop${stops > 1 ? 's' : ''}`;
+
+      // Build booking URL
+      const bookingData = this.buildBookingURL({
+        airlineCode: airline.iata_code,
+        origin,
+        destination,
+        departure: departure, // Use the normalized departure date
+        return: searchParams.returnDate || searchParams.return,
+        passengers: searchParams.passengers || 1,
+        cabin: searchParams.cabin || 'economy'
+      });
+
+      const bookingCTA = bookingData.source === 'airline'
+        ? `Book on ${airline.name}`
+        : `View on Google Flights`;
+
+      return `${index}. ${airline.name} ${priceDisplay}\n${duration.text} • ${stopsText}\n🔗 ${bookingCTA}: ${bookingData.url}`;
+    }).join('\n\n');
+
+    const footer = `\n\nYou'll complete your booking on the airline's official site.`;
+
+    return `${header}${flightsList}${footer}`;
   }
 
-  message += `\n\n`;
+  /**
+   * Check if we have a deep link pattern for an airline
+   * @param {string} airlineCode - IATA airline code
+   * @returns {boolean} True if pattern exists
+   */
+  hasPattern(airlineCode) {
+    return !!airlineDeepLinks[airlineCode];
+  }
 
-  results.forEach((result, index) => {
-    message += `${index + 1}. ${result.airline.name}\n`;
-    message += `   ${result.price.formatted} • ${result.duration.formatted}`;
+  /**
+   * Get list of all supported airlines
+   * @returns {Array<string>} Array of IATA codes
+   */
+  getSupportedAirlines() {
+    return Object.keys(airlineDeepLinks);
+  }
 
-    if (result.legs[0].stops > 0) {
-      message += ` • ${result.legs[0].stops} stop${result.legs[0].stops > 1 ? 's' : ''}`;
-    } else {
-      message += ` • Nonstop`;
-    }
-
-    message += `\n`;
-
-    // Departure details
-    message += `   ${result.legs[0].departure.timeFormatted} ${result.legs[0].departure.airport} → `;
-    message += `${result.legs[0].arrival.timeFormatted} ${result.legs[0].arrival.airport}\n`;
-
-    // Add booking link if requested
-    if (includeLinks) {
-      message += `   ${result.bookingLink.ctaText}: ${result.bookingLink.url}\n`;
-    }
-
-    message += `\n`;
-  });
-
-  // Add disclaimer
-  message += `💡 Complete your booking directly on the airline's website.`;
-
-  return message;
+  /**
+   * Get count of supported airlines
+   * @returns {number} Number of airlines with deep link patterns
+   */
+  getSupportedCount() {
+    return Object.keys(airlineDeepLinks).length;
+  }
 }
 
-/**
- * Format single flight as card for display
- *
- * @param {Object} flightResult - Single flight result
- * @returns {Object} - Formatted card data
- */
-function formatFlightCard(flightResult) {
-  const { airline, price, duration, legs, bookingLink } = flightResult;
-
-  return {
-    title: airline.name,
-    logo: airline.logo,
-    price: price.formatted,
-    duration: duration.formatted,
-    stops: legs[0].stops === 0 ? 'Nonstop' : `${legs[0].stops} stop${legs[0].stops > 1 ? 's' : ''}`,
-    departure: {
-      time: legs[0].departure.timeFormatted,
-      airport: legs[0].departure.airport,
-      city: legs[0].departure.city
-    },
-    arrival: {
-      time: legs[0].arrival.timeFormatted,
-      airport: legs[0].arrival.airport,
-      city: legs[0].arrival.city
-    },
-    cta: {
-      text: bookingLink.ctaText,
-      url: bookingLink.url,
-      provider: bookingLink.provider
-    }
-  };
-}
-
-/**
- * Get list of all supported airlines
- *
- * @returns {Object[]} - Array of airline information
- */
-function listSupportedAirlines() {
-  const codes = getSupportedAirlines();
-
-  return codes.map(code => getAirlineInfo(code)).filter(Boolean);
-}
-
-/**
- * Check if a specific airline is supported
- *
- * @param {string} airlineCode - IATA airline code
- * @returns {Object} - { supported: boolean, airlineInfo: Object }
- */
-function checkAirlineSupport(airlineCode) {
-  const supported = isAirlineSupported(airlineCode);
-  const airlineInfo = supported ? getAirlineInfo(airlineCode) : null;
-
-  return { supported, airlineInfo };
-}
-
-/**
- * Get flight offer by Duffel offer ID
- *
- * This would typically fetch from a cache or database where offers are temporarily stored
- * For now, it's a placeholder for future implementation
- *
- * @param {string} offerId - Duffel offer ID
- * @returns {Promise<Object>} - Offer details
- */
-async function getOfferById(offerId) {
-  // TODO: Implement offer retrieval from cache/database
-  // For now, return null
-  console.warn(`getOfferById not yet implemented for offer: ${offerId}`);
-  return null;
-}
-
-/**
- * Track deep link click for analytics
- *
- * @param {Object} clickData - Click tracking data
- * @param {string} clickData.offerId - Duffel offer ID
- * @param {string} clickData.airlineCode - IATA airline code
- * @param {string} clickData.provider - 'airline' or 'google'
- * @param {string} clickData.userId - User identifier (phone number, session ID, etc.)
- * @returns {Promise<void>}
- */
-async function trackDeeplinkClick(clickData) {
-  // TODO: Implement analytics tracking
-  // Could store in database or send to analytics service
-  console.log('Deep link clicked:', {
-    timestamp: new Date().toISOString(),
-    ...clickData
-  });
-}
-
-module.exports = {
-  searchFlightsWithDeeplinks,
-  getBestOffer,
-  formatFlightResultsSMS,
-  formatFlightCard,
-  listSupportedAirlines,
-  checkAirlineSupport,
-  getOfferById,
-  trackDeeplinkClick
-};
+// Export as singleton instance
+module.exports = new AirlineDeepLinksService();
