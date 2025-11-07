@@ -63,30 +63,34 @@ class AirlineDeepLinksService {
   }
 
   /**
-   * Build Google Flights fallback URL
+   * Build Kayak fallback URL
    * Used when airline-specific pattern doesn't exist
+   * Kayak has reliable deep linking that actually works
    * @param {Object} params - URL parameters
    * @param {string} params.origin - Origin airport code
    * @param {string} params.destination - Destination airport code
    * @param {string} params.departure - Departure date (YYYY-MM-DD)
    * @param {string} [params.return] - Return date (YYYY-MM-DD)
-   * @returns {string} Google Flights URL
+   * @param {number} [params.passengers=1] - Number of passengers
+   * @param {string} [params.cabin='economy'] - Cabin class
+   * @returns {string} Kayak URL
    */
   buildGoogleFlightsFallback(params) {
-    const { origin, destination, departure, return: returnDate } = params;
+    const { origin, destination, departure, return: returnDate, passengers = 1, cabin = 'economy' } = params;
 
+    // Kayak URL format: https://www.kayak.com/flights/ORIGIN-DEST/YYYY-MM-DD/YYYY-MM-DD/PASSENGERS?sort=bestflight_a
     if (returnDate) {
       // Round trip
-      return `https://www.google.com/flights?hl=en#flt=${origin}.${destination}.${departure}*${destination}.${origin}.${returnDate}`;
+      return `https://www.kayak.com/flights/${origin}-${destination}/${departure}/${returnDate}/${passengers}adults?sort=bestflight_a&fs=bfc=${cabin}`;
     } else {
       // One-way
-      return `https://www.google.com/flights?hl=en#flt=${origin}.${destination}.${departure}`;
+      return `https://www.kayak.com/flights/${origin}-${destination}/${departure}/${passengers}adults?sort=bestflight_a&fs=bfc=${cabin}`;
     }
   }
 
   /**
    * Build booking URL with fallback
-   * Tries to build airline-specific URL, falls back to Google Flights if not available
+   * Tries to build airline-specific URL, falls back to Kayak if not available
    * @param {Object} params - URL parameters
    * @param {string} params.airlineCode - IATA airline code
    * @param {string} params.origin - Origin airport code
@@ -95,7 +99,7 @@ class AirlineDeepLinksService {
    * @param {string} [params.return] - Return date (YYYY-MM-DD)
    * @param {number} [params.passengers=1] - Number of passengers
    * @param {string} [params.cabin='economy'] - Cabin class
-   * @returns {Object} { url, source: 'airline' | 'google_flights' }
+   * @returns {Object} { url, source: 'airline' | 'kayak' }
    */
   buildBookingURL(params) {
     // Try airline-specific URL first
@@ -109,14 +113,14 @@ class AirlineDeepLinksService {
       };
     }
 
-    // Fallback to Google Flights
-    const googleFlightsUrl = this.buildGoogleFlightsFallback(params);
+    // Fallback to Kayak (more reliable than Google Flights)
+    const kayakUrl = this.buildGoogleFlightsFallback(params);
 
-    console.log(`[AirlineDeepLinks] Using Google Flights fallback for ${params.airlineCode}`);
+    console.log(`[AirlineDeepLinks] Using Kayak fallback for ${params.airlineCode}`);
 
     return {
-      url: googleFlightsUrl,
-      source: 'google_flights',
+      url: kayakUrl,
+      source: 'kayak',
       airline: params.airlineCode
     };
   }
@@ -166,14 +170,13 @@ class AirlineDeepLinksService {
         cabin: searchParams.cabin || 'economy'
       });
 
-      const bookingCTA = bookingData.source === 'airline'
-        ? `Book on ${airline.name}`
-        : `View on Google Flights`;
+      // Always use Kayak now (airline deep links are unreliable)
+      const bookingCTA = `Search on Kayak`;
 
       return `${index}. ${airline.name} ${priceDisplay}\n${duration.text} • ${stopsText}\n🔗 ${bookingCTA}: ${bookingData.url}`;
     }).join('\n\n');
 
-    const footer = `\n\nYou'll complete your booking on the airline's official site.`;
+    const footer = `\n\nKayak compares all airlines so you can find the best price.`;
 
     return `${header}${flightsList}${footer}`;
   }
