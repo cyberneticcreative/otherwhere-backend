@@ -232,10 +232,10 @@ class HotelsService {
 
       // Add optional parameters
       if (checkIn) {
-        searchParams.checkInDate = checkIn;
+        searchParams.checkinDate = checkIn;
       }
       if (checkOut) {
-        searchParams.checkOutDate = checkOut;
+        searchParams.checkoutDate = checkOut;
       }
       if (currency) {
         searchParams.currency = currency;
