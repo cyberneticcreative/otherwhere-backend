@@ -438,10 +438,9 @@ class AirbnbService {
     // Apply quality filters
     const filteredProperties = this.filterProperties(searchResults.results, options);
 
-    // Get only the requested number of properties
-    const propertiesToFormat = filteredProperties.slice(0, limit);
-
-    return propertiesToFormat.map((property, index) => {
+    // Format ALL filtered properties (not just limit) so we can filter out $0 prices
+    // We'll slice to limit AFTER filtering out invalid prices
+    const formattedProperties = filteredProperties.map((property, index) => {
       // Handle nested API response structure (listing, pricingQuote, listingParamOverrides)
       const listing = property.listing || property;
       const pricingQuote = property.pricingQuote || {};
@@ -451,17 +450,54 @@ class AirbnbService {
       const name = listing.name || listing.title || listing.publicAddress || property.name || property.title || 'Property';
 
       // Price can be in pricingQuote.structuredStayDisplayPrice.primaryLine.price or other locations
-      const priceString = pricingQuote.structuredStayDisplayPrice?.primaryLine?.price
-        || pricingQuote.rate?.amount
-        || property.price?.rate
-        || property.price
-        || property.pricePerNight
-        || 0;
+      // Try each location and log what we find
+      let priceString = null;
+      let priceSource = 'none';
+
+      if (pricingQuote.structuredStayDisplayPrice?.primaryLine?.price) {
+        priceString = pricingQuote.structuredStayDisplayPrice.primaryLine.price;
+        priceSource = 'pricingQuote.structuredStayDisplayPrice.primaryLine.price';
+      } else if (pricingQuote.structuredStayDisplayPrice?.secondaryLine?.price) {
+        priceString = pricingQuote.structuredStayDisplayPrice.secondaryLine.price;
+        priceSource = 'pricingQuote.structuredStayDisplayPrice.secondaryLine.price';
+      } else if (pricingQuote.price) {
+        priceString = pricingQuote.price;
+        priceSource = 'pricingQuote.price';
+      } else if (pricingQuote.rate?.amount) {
+        priceString = pricingQuote.rate.amount;
+        priceSource = 'pricingQuote.rate.amount';
+      } else if (pricingQuote.pricePerNight) {
+        priceString = pricingQuote.pricePerNight;
+        priceSource = 'pricingQuote.pricePerNight';
+      } else if (property.price?.rate) {
+        priceString = property.price.rate;
+        priceSource = 'property.price.rate';
+      } else if (property.price) {
+        priceString = property.price;
+        priceSource = 'property.price';
+      } else if (property.pricePerNight) {
+        priceString = property.pricePerNight;
+        priceSource = 'property.pricePerNight';
+      } else if (listing.price) {
+        priceString = listing.price;
+        priceSource = 'listing.price';
+      } else {
+        priceString = 0;
+        priceSource = 'default (0)';
+      }
+
+      console.log(`[Airbnb] Property ${index + 1} price source: ${priceSource} = ${priceString}`);
 
       // Extract numeric price from string like "$123" or "123"
       const pricePerNight = typeof priceString === 'string'
         ? parseFloat(priceString.replace(/[^0-9.]/g, ''))
-        : priceString;
+        : (priceString || 0);
+
+      // If price is still 0, dump the entire property object for debugging
+      if (!pricePerNight || pricePerNight === 0) {
+        console.error(`[Airbnb] ⚠️ Property ${index + 1} has $0 price! Full property object:`,
+          JSON.stringify(property, null, 2).substring(0, 2000));
+      }
 
       const currency = pricingQuote.rate?.currency || property.price?.currency || 'USD';
       const rating = listing.avgRating || listing.rating || property.rating || property.avgRating || 0;
@@ -476,16 +512,17 @@ class AirbnbService {
       // Generate Airbnb URL
       const airbnbUrl = id ? `https://www.airbnb.com/rooms/${id}` : '';
 
-      // Debug: log available fields for first property
-      if (index === 0) {
-        console.log(`[Airbnb] Sample property structure:`, {
-          topLevel: Object.keys(property),
-          listingKeys: listing ? Object.keys(listing).slice(0, 10) : [],
-          pricingKeys: pricingQuote ? Object.keys(pricingQuote) : [],
-          extractedPrice: pricePerNight,
-          extractedName: name
-        });
-      }
+      // Debug: log available fields for ALL properties to diagnose $0/nt issue
+      console.log(`[Airbnb] Property ${index + 1} structure:`, {
+        topLevel: Object.keys(property),
+        listingKeys: listing ? Object.keys(listing).slice(0, 10) : [],
+        pricingKeys: pricingQuote ? Object.keys(pricingQuote) : [],
+        structuredStayKeys: pricingQuote.structuredStayDisplayPrice ? Object.keys(pricingQuote.structuredStayDisplayPrice) : null,
+        primaryLineKeys: pricingQuote.structuredStayDisplayPrice?.primaryLine ? Object.keys(pricingQuote.structuredStayDisplayPrice.primaryLine) : null,
+        extractedPriceString: priceString,
+        extractedPrice: pricePerNight,
+        extractedName: name
+      });
 
       return {
         index: index + 1,
@@ -504,6 +541,24 @@ class AirbnbService {
         rawData: property
       };
     });
+
+    // Filter out properties with no valid price
+    const propertiesWithPrice = formattedProperties.filter(property => {
+      if (!property.pricePerNight || property.pricePerNight === 0) {
+        console.warn(`[Airbnb] ⚠️ Filtering out property with $0 price: ${property.name}`);
+        return false;
+      }
+      return true;
+    });
+
+    // Get only the requested number of properties (now that we've filtered out $0 prices)
+    const finalProperties = propertiesWithPrice.slice(0, limit);
+
+    // Re-index the final properties to be sequential (1, 2, 3...)
+    return finalProperties.map((property, index) => ({
+      ...property,
+      index: index + 1
+    }));
   }
 
   /**
