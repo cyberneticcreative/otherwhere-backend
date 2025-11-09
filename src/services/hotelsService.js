@@ -257,7 +257,7 @@ class HotelsService {
       });
 
       // Extract hotels from response
-      const properties = data?.properties || data?.data?.properties || [];
+      const properties = data?.data?.propertySearchListings || data?.properties || data?.data?.properties || [];
       const propertiesArray = Array.isArray(properties) ? properties : [];
 
       console.log(`[Hotels.com] Found ${propertiesArray.length} hotels`);
@@ -342,25 +342,39 @@ class HotelsService {
     const formattedHotels = filteredHotels.map((hotel, index) => {
       // Extract hotel details from various possible locations
       const id = hotel.id || hotel.propertyId;
-      const name = hotel.name || 'Hotel';
+
+      // Name extraction - support new API structure
+      const name = hotel.headingSection?.heading || hotel.name || 'Hotel';
 
       // Price extraction with multiple fallback paths
       let priceString = null;
       let priceSource = 'none';
 
-      if (hotel.price?.lead?.amount) {
+      // New API structure: priceSection.priceSummary.displayMessages[0].lineItems (find LEAD role)
+      if (hotel.priceSection?.priceSummary?.displayMessages?.[0]?.lineItems) {
+        const leadPrice = hotel.priceSection.priceSummary.displayMessages[0].lineItems.find(
+          item => item.role === 'LEAD'
+        );
+        if (leadPrice?.price?.formatted) {
+          priceString = leadPrice.price.formatted;
+          priceSource = 'hotel.priceSection.priceSummary (LEAD)';
+        }
+      }
+
+      // Old API structure fallbacks
+      if (!priceString && hotel.price?.lead?.amount) {
         priceString = hotel.price.lead.amount;
         priceSource = 'hotel.price.lead.amount';
-      } else if (hotel.price?.displayPrice) {
+      } else if (!priceString && hotel.price?.displayPrice) {
         priceString = hotel.price.displayPrice;
         priceSource = 'hotel.price.displayPrice';
-      } else if (hotel.ratePlan?.price?.current) {
+      } else if (!priceString && hotel.ratePlan?.price?.current) {
         priceString = hotel.ratePlan.price.current;
         priceSource = 'hotel.ratePlan.price.current';
-      } else if (hotel.price) {
+      } else if (!priceString && hotel.price) {
         priceString = hotel.price;
         priceSource = 'hotel.price';
-      } else {
+      } else if (!priceString) {
         priceString = 0;
         priceSource = 'default (0)';
       }
@@ -378,11 +392,32 @@ class HotelsService {
           JSON.stringify(hotel, null, 2).substring(0, 2000));
       }
 
-      const currency = hotel.price?.lead?.currencyInfo?.code || 'USD';
-      const rating = hotel.reviews?.score || hotel.starRating || 0;
-      const reviewCount = hotel.reviews?.total || 0;
+      // Rating extraction - new API structure
+      let rating = 0;
+      let reviewCount = 0;
+
+      if (hotel.summarySections?.[0]?.guestRatingSectionV2?.badge?.text) {
+        rating = parseFloat(hotel.summarySections[0].guestRatingSectionV2.badge.text) || 0;
+
+        // Extract review count from phrases like "2,622 reviews"
+        const reviewPhrase = hotel.summarySections[0].guestRatingSectionV2.phrases?.[1]?.phraseParts?.[0]?.text || '';
+        const reviewMatch = reviewPhrase.match(/[\d,]+/);
+        if (reviewMatch) {
+          reviewCount = parseInt(reviewMatch[0].replace(/,/g, '')) || 0;
+        }
+      } else {
+        // Old API structure fallbacks
+        rating = hotel.reviews?.score || hotel.starRating || 0;
+        reviewCount = hotel.reviews?.total || 0;
+      }
+
+      const currency = hotel.priceSection?.priceSummary?.displayMessages?.[0]?.lineItems?.[0]?.price?.currency
+        || hotel.price?.lead?.currencyInfo?.code || 'USD';
       const starRating = hotel.star || hotel.starRating || 0;
-      const mainImage = hotel.propertyImage?.image?.url || hotel.image?.url || '';
+
+      // Image extraction - new API structure
+      const mainImage = hotel.mediaSection?.gallery?.media?.[0]?.media?.url
+        || hotel.propertyImage?.image?.url || hotel.image?.url || '';
 
       // Generate Hotels.com URL
       const hotelUrl = id ? `https://www.hotels.com/h${id}.Hotel-Information` : '';
