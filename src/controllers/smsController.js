@@ -250,9 +250,49 @@ class SMSController {
         });
         console.log(`💾 Stored ${accommodationResults.properties.length} properties in session for ${from}`);
 
-        // Use Airbnb service for formatting
-        const airbnbService = require('../services/airbnbService');
-        const accommodationMessage = airbnbService.formatSMSMessage(
+        // Format accommodation message (supports both Airbnb and Hotels.com)
+        const formatAccommodationMessage = (properties, searchInfo) => {
+          if (!properties || properties.length === 0) {
+            return 'Sorry, no accommodations found.';
+          }
+
+          const { checkIn, checkOut, destinationName } = searchInfo;
+
+          // Compact date format (MM/DD)
+          const formatDate = (dateStr) => {
+            if (!dateStr) return '';
+            const parts = dateStr.split('-');
+            if (parts.length === 3) return `${parts[1]}/${parts[2]}`;
+            return dateStr;
+          };
+
+          const dateRange = checkIn && checkOut ? ` ${formatDate(checkIn)}-${formatDate(checkOut)}` : '';
+          const header = `🏠 ${destinationName || 'Your destination'}${dateRange}\n\n`;
+
+          const propertiesList = properties.map(property => {
+            const price = `$${property.pricePerNight}/nt`;
+            const ratingDisplay = property.rating !== 'New' ? `⭐${property.rating}` : '⭐New';
+
+            // Show source indicator (Airbnb or Hotel)
+            const sourceIcon = property.source === 'hotel' ? '🏨' : '🏠';
+
+            // Compact name (max 28 chars to fit source icon)
+            const shortName = property.name.length > 28
+              ? property.name.substring(0, 25) + '...'
+              : property.name;
+
+            // Property type info
+            const typeInfo = property.source === 'hotel' && property.starRating
+              ? `${property.starRating}★ Hotel`
+              : property.propertyType || 'Property';
+
+            return `${property.index}. ${sourceIcon} ${shortName} - ${price}\n${typeInfo} ${ratingDisplay}`;
+          }).join('\n\n');
+
+          return `${header}${propertiesList}\n\nReply 1-${properties.length} for booking link`;
+        };
+
+        const accommodationMessage = formatAccommodationMessage(
           accommodationResults.properties,
           {
             destinationName: accommodationResults.destinationName,

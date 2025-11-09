@@ -3,6 +3,7 @@ const duffelFlightsService = require('./duffelFlightsService');
 const airlineDeepLinksService = require('./airlineDeepLinksService');
 const airportResolverService = require('./airportResolverService');
 const airbnbService = require('./airbnbService');
+const hotelsService = require('./hotelsService');
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
@@ -349,60 +350,122 @@ class AssistantService {
               const correctedCheckIn = fixPastDate(args.check_in || args.checkIn);
               const correctedCheckOut = fixPastDate(args.check_out || args.checkOut);
 
-              // ACTUALLY SEARCH FOR ACCOMMODATIONS using Airbnb API
+              // Determine accommodation type: "airbnb", "hotel", or "both" (default)
+              const accommodationType = (args.accommodation_type || args.accommodationType || 'both').toLowerCase();
+              console.log(`🏠 Accommodation type preference: ${accommodationType}`);
+
+              // SEARCH FOR ACCOMMODATIONS (Airbnb, Hotels.com, or both)
               try {
                 const accommodationSearchStart = Date.now();
-                console.log('🏠 Calling Airbnb API...');
 
-                // Step 1: Resolve destination ID
-                console.log(`🔍 Searching destination: ${args.destination}`);
-                const destinations = await airbnbService.searchDestination(args.destination, 'USA');
+                let allProperties = [];
+                let destinationName = args.destination;
+                let searchType = '';
 
-                if (!destinations || destinations.length === 0) {
-                  throw new Error(`Could not find destination: ${args.destination}`);
+                // Search Airbnb if requested
+                if (accommodationType === 'airbnb' || accommodationType === 'both') {
+                  try {
+                    console.log('🏠 Calling Airbnb API...');
+
+                    const destinations = await airbnbService.searchDestination(args.destination, 'USA');
+                    if (destinations && destinations.length > 0) {
+                      const airbnbDestId = destinations[0]?.id;
+                      destinationName = destinations[0]?.name || args.destination;
+
+                      const airbnbParams = {
+                        destinationId: airbnbDestId,
+                        checkIn: correctedCheckIn,
+                        checkOut: correctedCheckOut,
+                        adults: parseInt(args.guests) || 1,
+                        maxPrice: args.budget_per_night_usd || args.budgetPerNight || undefined,
+                        currency: 'USD',
+                        limit: 10
+                      };
+
+                      const airbnbResults = await airbnbService.searchProperties(airbnbParams);
+                      const formattedAirbnb = airbnbService.formatPropertyResults(airbnbResults, 5, {
+                        privateOnly: true,
+                        minRating: 4.0,
+                        minReviews: 0
+                      });
+
+                      // Tag as Airbnb
+                      formattedAirbnb.forEach(prop => prop.source = 'airbnb');
+                      allProperties = allProperties.concat(formattedAirbnb);
+                      searchType = 'Airbnb';
+
+                      console.log(`✅ Found ${formattedAirbnb.length} Airbnb properties`);
+                    }
+                  } catch (airbnbError) {
+                    console.error('❌ Airbnb search failed:', airbnbError.message);
+                  }
                 }
 
-                const destinationId = destinations[0]?.id;
-                const destinationName = destinations[0]?.name || args.destination;
+                // Search Hotels.com if requested
+                if (accommodationType === 'hotel' || accommodationType === 'both') {
+                  try {
+                    console.log('🏨 Calling Hotels.com API...');
 
-                if (!destinationId) {
-                  console.error(`[Airbnb] Destination missing ID:`, destinations[0]);
-                  throw new Error(`Could not resolve destination ID for: ${args.destination}`);
+                    const regions = await hotelsService.searchRegion(args.destination);
+                    if (regions && regions.length > 0) {
+                      const hotelLocationId = regions[0]?.id;
+                      destinationName = regions[0]?.name || destinationName;
+
+                      const hotelParams = {
+                        locationId: hotelLocationId,
+                        checkIn: correctedCheckIn,
+                        checkOut: correctedCheckOut,
+                        adults: parseInt(args.guests) || 1,
+                        maxPrice: args.budget_per_night_usd || args.budgetPerNight || undefined,
+                        currency: 'USD',
+                        limit: 10
+                      };
+
+                      const hotelResults = await hotelsService.searchHotels(hotelParams);
+                      const formattedHotels = hotelsService.formatHotelResults(hotelResults, 5, {
+                        minRating: 3.5,
+                        minReviews: 10
+                      });
+
+                      // Tag as hotel
+                      formattedHotels.forEach(hotel => hotel.source = 'hotel');
+                      allProperties = allProperties.concat(formattedHotels);
+                      searchType = searchType ? 'Airbnb & Hotels' : 'Hotels';
+
+                      console.log(`✅ Found ${formattedHotels.length} Hotels.com properties`);
+                    }
+                  } catch (hotelError) {
+                    console.error('❌ Hotels.com search failed:', hotelError.message);
+                  }
                 }
 
-                console.log(`[Airbnb] Resolved destination: ${destinationName} (${destinationId})`);
+                // If we got no results from either, throw an error
+                if (allProperties.length === 0) {
+                  throw new Error(`No accommodations found from ${searchType || 'any source'}`);
+                }
 
-                // Step 2: Search properties
-                const searchParams = {
-                  destinationId: destinationId,
-                  checkIn: correctedCheckIn,
-                  checkOut: correctedCheckOut,
-                  adults: parseInt(args.guests) || 1,
-                  maxPrice: args.budget_per_night_usd || args.budgetPerNight || undefined,
-                  currency: 'USD',
-                  limit: 10
-                };
+                // Sort all properties by price (lowest first) and take top 3
+                allProperties.sort((a, b) => a.pricePerNight - b.pricePerNight);
+                const topProperties = allProperties.slice(0, 3);
 
-                const searchResults = await airbnbService.searchProperties(searchParams);
-
-                // Step 3: Format results
-                const formattedProperties = airbnbService.formatPropertyResults(searchResults, 3, {
-                  privateOnly: true,
-                  minRating: 4.0,
-                  minReviews: 0 // Allow new listings
-                });
+                // Re-index to be sequential
+                topProperties.forEach((prop, idx) => prop.index = idx + 1);
 
                 // Store formatted results for SMS sending later
                 accommodationResults = {
-                  properties: formattedProperties,
-                  destinationId,
+                  properties: topProperties,
                   destinationName,
-                  searchParams
+                  searchParams: {
+                    checkIn: correctedCheckIn,
+                    checkOut: correctedCheckOut,
+                    guests: parseInt(args.guests) || 1
+                  },
+                  searchType
                 };
 
                 // Return accommodation results to the assistant
-                const resultsMessage = formattedProperties.length > 0
-                  ? `Found ${formattedProperties.length} great places! Best option: $${formattedProperties[0].pricePerNight}/night with ${formattedProperties[0].rating}⭐ rating. Accommodation details are being sent via SMS now.`
+                const resultsMessage = topProperties.length > 0
+                  ? `Found ${topProperties.length} great ${searchType} options! Best: $${topProperties[0].pricePerNight}/night with ${topProperties[0].rating}⭐ rating. Details being sent via SMS.`
                   : `No accommodations found for these dates. Try different dates or a nearby location.`;
 
                 toolOutputs.push({
@@ -410,17 +473,18 @@ class AssistantService {
                   output: JSON.stringify({
                     success: true,
                     message: resultsMessage,
-                    propertyCount: formattedProperties.length,
-                    bestPrice: formattedProperties[0]?.pricePerNight || null,
-                    bestRating: formattedProperties[0]?.rating || null
+                    propertyCount: topProperties.length,
+                    bestPrice: topProperties[0]?.pricePerNight || null,
+                    bestRating: topProperties[0]?.rating || null,
+                    searchType
                   })
                 });
 
                 const accommodationSearchDuration = Date.now() - accommodationSearchStart;
-                console.log(`✅ Accommodation search completed: ${formattedProperties.length} results in ${accommodationSearchDuration}ms`);
+                console.log(`✅ Accommodation search completed: ${topProperties.length} results (${searchType}) in ${accommodationSearchDuration}ms`);
 
               } catch (error) {
-                console.error('❌ Airbnb API error:', error.message);
+                console.error('❌ Accommodation search error:', error.message);
 
                 // Return error to assistant
                 toolOutputs.push({

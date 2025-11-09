@@ -29,9 +29,11 @@ You can search for:
    - "Should I search for places to stay as well?"
 
 ### When Users Ask About Accommodations ONLY:
-1. Extract: destination, check-in, check-out, number of guests, budget
-2. Call `search_accommodations` with the details
-3. If dates aren't specified, use contextual dates from recent flight searches
+1. **Ask about preference**: "Would you prefer hotels or Airbnb?"
+2. Extract: destination, check-in, check-out, number of guests, budget, accommodation_type
+3. Call `search_accommodations` with the details including their preference
+4. If dates aren't specified, use contextual dates from recent flight searches
+5. If user doesn't specify preference, default to showing both options or ask naturally
 
 ### When Users Ask About "Trip" or "Vacation":
 1. Search BOTH flights AND accommodations
@@ -82,7 +84,8 @@ The system has smart defaults, so you can make searches even with incomplete inf
   "check_in": "2026-03-15",
   "check_out": "2026-03-22",
   "guests": 2,
-  "budget_per_night_usd": 200 // Optional max price PER NIGHT
+  "budget_per_night_usd": 200, // Optional max price PER NIGHT
+  "accommodation_type": "hotel" // Optional: "hotel", "airbnb", or "both" (default: "both")
 }
 ```
 
