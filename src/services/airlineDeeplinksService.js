@@ -5,6 +5,8 @@
  */
 
 const airlineDeepLinks = require('../data/airlineDeepLinks.json');
+const linkRedirectorService = require('./linkRedirectorService');
+const { buildKayakUrl } = require('../lib/links');
 
 class AirlineDeepLinksService {
   /**
@@ -63,9 +65,9 @@ class AirlineDeepLinksService {
   }
 
   /**
-   * Build Kayak fallback URL
+   * Build smart booking URL with validation and fallback
    * Used when airline-specific pattern doesn't exist
-   * Kayak has reliable deep linking that actually works
+   * Creates a redirector link that auto-selects best working provider
    * @param {Object} params - URL parameters
    * @param {string} params.origin - Origin airport code
    * @param {string} params.destination - Destination airport code
@@ -73,19 +75,57 @@ class AirlineDeepLinksService {
    * @param {string} [params.return] - Return date (YYYY-MM-DD)
    * @param {number} [params.passengers=1] - Number of passengers
    * @param {string} [params.cabin='economy'] - Cabin class
+   * @param {string} [params.userCountry='US'] - User country for TLD selection
+   * @returns {Promise<string>} Redirector URL
+   */
+  async buildSmartFlightLink(params) {
+    const { origin, destination, departure, return: returnDate, passengers = 1, cabin = 'economy', userCountry = 'US' } = params;
+
+    // Map cabin to link format
+    const cabinMap = {
+      'economy': 'e',
+      'premium_economy': 'p',
+      'business': 'b',
+      'first': 'f'
+    };
+
+    const trip = {
+      origin,
+      destination,
+      departDate: departure,
+      returnDate: returnDate || null,
+      adults: passengers,
+      cabin: cabinMap[cabin] || 'e'
+    };
+
+    // Create link bundle with validation and fallback
+    const { token } = await linkRedirectorService.createBundle(trip, userCountry);
+
+    // Return short redirector URL
+    const baseUrl = process.env.BACKEND_WEBHOOK_URL || 'https://otherwhere-backend-production.up.railway.app';
+    return `${baseUrl}/r/${token}`;
+  }
+
+  /**
+   * Build Kayak fallback URL (legacy - kept for compatibility)
+   * Used when airline-specific pattern doesn't exist
+   * @param {Object} params - URL parameters
    * @returns {string} Kayak URL
    */
   buildGoogleFlightsFallback(params) {
     const { origin, destination, departure, return: returnDate, passengers = 1, cabin = 'economy' } = params;
 
-    // Kayak URL format: https://www.kayak.com/flights/ORIGIN-DEST/YYYY-MM-DD/YYYY-MM-DD/PASSENGERS?sort=bestflight_a
-    if (returnDate) {
-      // Round trip
-      return `https://www.kayak.com/flights/${origin}-${destination}/${departure}/${returnDate}/${passengers}adults?sort=bestflight_a&fs=bfc=${cabin}`;
-    } else {
-      // One-way
-      return `https://www.kayak.com/flights/${origin}-${destination}/${departure}/${passengers}adults?sort=bestflight_a&fs=bfc=${cabin}`;
-    }
+    // Use new link builder for consistent URL format
+    const trip = {
+      origin,
+      destination,
+      departDate: departure,
+      returnDate: returnDate || null,
+      adults: passengers,
+      cabin: cabin === 'business' ? 'b' : cabin === 'first' ? 'f' : 'e'
+    };
+
+    return buildKayakUrl(trip, 'com', true);
   }
 
   /**
@@ -129,14 +169,14 @@ class AirlineDeepLinksService {
    * Format SMS message with flight options and booking links
    * @param {Array} flights - Formatted flight data from Duffel
    * @param {Object} searchParams - Original search parameters
-   * @returns {string} SMS message
+   * @returns {Promise<string>} SMS message
    */
-  formatSMSWithLinks(flights, searchParams) {
+  async formatSMSWithLinks(flights, searchParams) {
     if (!flights || flights.length === 0) {
       return 'Sorry, no flights found for your search. Try different dates or airports.';
     }
 
-    const { origin, destination } = searchParams;
+    const { origin, destination, userCountry = 'US' } = searchParams;
     // Support both 'departure' and 'departureDate' for flexibility
     const departure = searchParams.departure || searchParams.departureDate;
 
@@ -150,6 +190,17 @@ class AirlineDeepLinksService {
     const dateDisplay = formatDate(departure);
     const header = `✈️ ${origin}→${destination} ${dateDisplay}\n\n`;
 
+    // Build smart link once for all flights (same search parameters)
+    const smartLink = await this.buildSmartFlightLink({
+      origin,
+      destination,
+      departure,
+      return: searchParams.returnDate || searchParams.return,
+      passengers: searchParams.passengers || 1,
+      cabin: searchParams.cabin || 'economy',
+      userCountry
+    });
+
     const flightsList = flights.map(flight => {
       const { index, airline, price, currency, duration, stops } = flight;
 
@@ -159,24 +210,10 @@ class AirlineDeepLinksService {
       // Format stops
       const stopsText = stops === 0 ? 'Direct' : `${stops} stop${stops > 1 ? 's' : ''}`;
 
-      // Build booking URL
-      const bookingData = this.buildBookingURL({
-        airlineCode: airline.iata_code,
-        origin,
-        destination,
-        departure: departure, // Use the normalized departure date
-        return: searchParams.returnDate || searchParams.return,
-        passengers: searchParams.passengers || 1,
-        cabin: searchParams.cabin || 'economy'
-      });
-
-      // Always use Kayak now (airline deep links are unreliable)
-      const bookingCTA = `Search on Kayak`;
-
-      return `${index}. ${airline.name} ${priceDisplay}\n${duration.text} • ${stopsText}\n🔗 ${bookingCTA}: ${bookingData.url}`;
+      return `${index}. ${airline.name} ${priceDisplay}\n${duration.text} • ${stopsText}`;
     }).join('\n\n');
 
-    const footer = `\n\nKayak compares all airlines so you can find the best price.`;
+    const footer = `\n\n🔗 Search all options: ${smartLink}\n\nAuto-selects best flight search provider.`;
 
     return `${header}${flightsList}${footer}`;
   }

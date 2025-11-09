@@ -182,7 +182,7 @@ class SMSController {
 
         try {
           // Format SMS message with flight options and airline deeplinks
-          const flightMessage = airlineDeepLinksService.formatSMSWithLinks(
+          const flightMessage = await airlineDeepLinksService.formatSMSWithLinks(
             flightResults.flights,
             {
               origin: flightResults.originCode,

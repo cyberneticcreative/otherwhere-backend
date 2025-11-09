@@ -242,7 +242,7 @@ class WebhookController {
           });
 
           // Format SMS message with flight options and airline deeplinks
-          const smsMessage = airlineDeepLinksService.formatSMSWithLinks(
+          const smsMessage = await airlineDeepLinksService.formatSMSWithLinks(
             flightsWithLinks,
             {
               origin: originCode,

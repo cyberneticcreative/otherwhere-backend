@@ -33,12 +33,44 @@ app.use(bodyParser.urlencoded({ extended: true }));
 
 // Health check endpoint
 app.get('/health', (req, res) => {
-  res.json({ 
+  res.json({
     status: 'healthy',
     service: 'Otherwhere Backend',
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || 'development'
   });
+});
+
+// Link redirector endpoint
+const linkRedirectorService = require('./services/linkRedirectorService');
+
+app.get('/r/:token', async (req, res) => {
+  const { token } = req.params;
+  const startTime = Date.now();
+
+  try {
+    console.log(`[Redirector] Request for token: ${token}`);
+
+    const result = await linkRedirectorService.resolveLink(token);
+    const latency = Date.now() - startTime;
+
+    console.log(`[Redirector] Redirecting to ${result.provider} (${latency}ms)${result.wasRevalidated ? ' [revalidated]' : ''}`);
+
+    // Redirect to the resolved URL
+    res.redirect(302, result.url);
+
+  } catch (error) {
+    console.error(`[Redirector] Error resolving token ${token}:`, error.message);
+
+    // Fallback to Google Flights search page
+    res.redirect(302, 'https://www.google.com/travel/flights');
+  }
+});
+
+// Get redirector stats (for debugging)
+app.get('/r-stats', (req, res) => {
+  const stats = linkRedirectorService.getStats();
+  res.json(stats);
 });
 
 // Twilio webhooks
