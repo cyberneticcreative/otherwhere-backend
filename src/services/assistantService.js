@@ -352,7 +352,7 @@ class AssistantService {
 
               // Determine accommodation type: "airbnb", "hotel", or "both" (default)
               const accommodationType = (args.accommodation_type || args.accommodationType || 'both').toLowerCase();
-              console.log(`🏠 Accommodation type preference: ${accommodationType}`);
+              console.log(`🏠 Accommodation type preference: "${accommodationType}" (type: ${typeof accommodationType})`);
 
               // SEARCH FOR ACCOMMODATIONS (Airbnb, Hotels.com, or both)
               try {
@@ -363,7 +363,12 @@ class AssistantService {
                 let searchType = '';
 
                 // Search Airbnb if requested
-                if (accommodationType === 'airbnb' || accommodationType === 'both') {
+                const shouldSearchAirbnb = (accommodationType === 'airbnb' || accommodationType === 'both');
+                const shouldSearchHotels = (accommodationType === 'hotel' || accommodationType === 'both');
+
+                console.log(`🔍 Search decisions: Airbnb=${shouldSearchAirbnb}, Hotels=${shouldSearchHotels}`);
+
+                if (shouldSearchAirbnb) {
                   try {
                     console.log('🏠 Calling Airbnb API...');
 
@@ -402,7 +407,7 @@ class AssistantService {
                 }
 
                 // Search Hotels.com if requested
-                if (accommodationType === 'hotel' || accommodationType === 'both') {
+                if (shouldSearchHotels) {
                   try {
                     console.log('🏨 Calling Hotels.com API...');
 
