@@ -107,7 +107,7 @@ class HotelsService {
 
         await this.rateLimitDelay();
 
-        const response = await axios.get(`${BASE_URL}/regions`, {
+        const response = await axios.get(`${BASE_URL}/hotels/auto-complete`, {
           params: { query: cleanQuery },
           headers: this.defaultHeaders,
           timeout: 15000
@@ -115,18 +115,35 @@ class HotelsService {
 
         const rawResults = response.data?.data || response.data || [];
 
-        console.log(`[Hotels.com] Found ${rawResults.length} regions for "${query}"`);
+        console.log(`[Hotels.com] Found ${rawResults.length} locations for "${query}"`);
 
         if (rawResults.length > 0) {
-          console.log(`[Hotels.com] Sample region:`, JSON.stringify(rawResults[0], null, 2).substring(0, 300));
+          console.log(`[Hotels.com] Sample location:`, JSON.stringify(rawResults[0], null, 2).substring(0, 500));
         }
 
-        // Format results
-        const regions = rawResults.map(region => ({
-          id: region.gaiaId || region.id || region.locationId,
-          name: region.regionNames?.fullName || region.name,
-          type: region.essId?.type || region.type || 'CITY'
-        }));
+        // Format results - support multiple possible response formats
+        const regions = rawResults.map(location => {
+          // Extract location ID - try multiple possible fields
+          const id = location.gaiaId
+            || location.regionId
+            || location.id
+            || location.hotelId
+            || location.locationId;
+
+          // Extract name - try multiple possible fields
+          const name = location.regionNames?.fullName
+            || location.regionName
+            || location.name
+            || location.cityName
+            || cleanQuery;
+
+          // Extract type
+          const type = location.essId?.type || location.type || 'CITY';
+
+          console.log(`[Hotels.com] Parsed location: id=${id}, name=${name}, type=${type}`);
+
+          return { id, name, type };
+        }).filter(region => region.id); // Only keep locations with valid IDs
 
         // Cache the result
         this.regionCache.set(cacheKey, {
