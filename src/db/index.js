@@ -6,55 +6,76 @@
 const { Pool } = require('pg');
 const fs = require('fs');
 const path = require('path');
+const dns = require('dns').promises;
+const net = require('net');
 
 // Check if database is configured
 const isConfigured = !!process.env.DATABASE_URL;
 
 // Create connection pool only if DATABASE_URL is set
 let pool = null;
+let initPromise = null;
 
 if (isConfigured) {
-  // Parse DATABASE_URL and force IPv4 if needed
-  const connectionConfig = {
-    connectionString: process.env.DATABASE_URL,
-    ssl: process.env.NODE_ENV === 'production' ? {
-      rejectUnauthorized: false
-    } : false,
-    max: 20, // Maximum number of clients in pool
-    idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 2000,
-  };
-
-  // Force IPv4 by setting host family option
-  // This prevents IPv6 connection attempts that may fail with ENETUNREACH
-  if (process.env.DATABASE_URL) {
+  // Initialize database connection asynchronously
+  initPromise = (async () => {
     try {
-      const url = new URL(process.env.DATABASE_URL);
-      connectionConfig.host = url.hostname;
-      connectionConfig.port = url.port || 5432;
-      connectionConfig.database = url.pathname.slice(1);
-      connectionConfig.user = url.username;
-      connectionConfig.password = url.password;
-      delete connectionConfig.connectionString;
+      // Parse DATABASE_URL
+      const dbUrl = new URL(process.env.DATABASE_URL);
+      const hostname = dbUrl.hostname;
 
-      // Set host to prefer IPv4
-      process.env.NODE_OPTIONS = (process.env.NODE_OPTIONS || '') + ' --dns-result-order=ipv4first';
-    } catch (parseError) {
-      console.warn('Could not parse DATABASE_URL, using connectionString as-is');
+      // Resolve hostname to IPv4 address to avoid IPv6 ENETUNREACH errors
+      let host = hostname;
+      try {
+        console.log(`🔍 Resolving database host: ${hostname}`);
+
+        // Try to resolve to IPv4 first
+        const addresses = await dns.resolve4(hostname);
+        if (addresses && addresses.length > 0) {
+          host = addresses[0];
+          console.log(`✅ Resolved ${hostname} to IPv4: ${host}`);
+        } else {
+          console.warn(`⚠️ No IPv4 address found for ${hostname}, using hostname`);
+        }
+      } catch (resolveError) {
+        console.warn(`⚠️ DNS resolution failed for ${hostname}:`, resolveError.message);
+        console.log('   Falling back to hostname (connection may use IPv6)');
+        // Continue with original hostname if resolution fails
+      }
+
+      // Configure connection with resolved IPv4 address
+      const connectionConfig = {
+        host: host,
+        port: parseInt(dbUrl.port) || 5432,
+        database: dbUrl.pathname.slice(1),
+        user: dbUrl.username,
+        password: dbUrl.password,
+        ssl: process.env.NODE_ENV === 'production' ? {
+          rejectUnauthorized: false
+        } : false,
+        max: 20, // Maximum number of clients in pool
+        idleTimeoutMillis: 30000,
+        connectionTimeoutMillis: 2000,
+      };
+
+      pool = new Pool(connectionConfig);
+
+      // Log pool errors
+      pool.on('error', (err, client) => {
+        console.error('Unexpected error on idle client', err);
+      });
+
+      // Test connection
+      pool.on('connect', () => {
+        console.log('✅ Database connected');
+      });
+
+      console.log(`📊 Database pool configured for ${host}:${connectionConfig.port}`);
+    } catch (error) {
+      console.error('❌ Database initialization error:', error.message);
+      throw error;
     }
-  }
-
-  pool = new Pool(connectionConfig);
-
-  // Log pool errors
-  pool.on('error', (err, client) => {
-    console.error('Unexpected error on idle client', err);
-  });
-
-  // Test connection
-  pool.on('connect', () => {
-    console.log('✅ Database connected');
-  });
+  })();
 }
 
 /**
@@ -64,8 +85,17 @@ if (isConfigured) {
  * @returns {Promise<Object>} Query result
  */
 async function query(text, params) {
-  if (!isConfigured || !pool) {
+  if (!isConfigured) {
     throw new Error('Database not configured. Set DATABASE_URL environment variable.');
+  }
+
+  // Wait for initialization to complete
+  if (initPromise) {
+    await initPromise;
+  }
+
+  if (!pool) {
+    throw new Error('Database pool not initialized');
   }
 
   const start = Date.now();
@@ -98,8 +128,17 @@ async function query(text, params) {
  * @returns {Promise<Object>} Database client
  */
 async function getClient() {
-  if (!isConfigured || !pool) {
+  if (!isConfigured) {
     throw new Error('Database not configured. Set DATABASE_URL environment variable.');
+  }
+
+  // Wait for initialization to complete
+  if (initPromise) {
+    await initPromise;
+  }
+
+  if (!pool) {
+    throw new Error('Database pool not initialized');
   }
 
   const client = await pool.connect();
@@ -170,8 +209,25 @@ async function testConnection() {
  * @returns {Promise<void>}
  */
 async function close() {
-  await pool.end();
-  console.log('Database pool closed');
+  // Wait for initialization to complete before closing
+  if (initPromise) {
+    await initPromise;
+  }
+
+  if (pool) {
+    await pool.end();
+    console.log('Database pool closed');
+  }
+}
+
+/**
+ * Wait for database initialization
+ * @returns {Promise<void>}
+ */
+async function waitForInit() {
+  if (initPromise) {
+    await initPromise;
+  }
 }
 
 module.exports = {
@@ -181,5 +237,6 @@ module.exports = {
   runMigrations,
   testConnection,
   close,
-  isConfigured
+  isConfigured,
+  waitForInit
 };

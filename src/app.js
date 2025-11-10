@@ -357,6 +357,10 @@ server.listen(PORT, '0.0.0.0', async () => {
   if (process.env.DATABASE_URL) {
     try {
       const db = require('./db');
+
+      // Wait for database initialization
+      await db.waitForInit();
+
       const connected = await db.testConnection();
 
       if (connected) {
