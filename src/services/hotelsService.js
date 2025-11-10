@@ -97,20 +97,7 @@ class HotelsService {
       return cached.data;
     }
 
-    // Check hardcoded fallback first
-    const fallbackKey = cleanQuery.toLowerCase();
-    const fallbackLocation = this.commonLocations[fallbackKey];
-    if (fallbackLocation) {
-      console.log(`[Hotels.com] Using fallback location for: ${cleanQuery}`);
-      const result = [fallbackLocation];
-      this.regionCache.set(cacheKey, {
-        data: result,
-        timestamp: Date.now()
-      });
-      return result;
-    }
-
-    // Try API with retry logic
+    // Try API first (fallbacks only used if API fails)
     const maxRetries = 2;
     let lastError;
 
@@ -164,6 +151,20 @@ class HotelsService {
           await new Promise(resolve => setTimeout(resolve, retryDelay));
         }
       }
+    }
+
+    // API failed, try hardcoded fallback as last resort
+    console.log(`[Hotels.com] API search failed, checking hardcoded fallback for: ${cleanQuery}`);
+    const fallbackKey = cleanQuery.toLowerCase();
+    const fallbackLocation = this.commonLocations[fallbackKey];
+    if (fallbackLocation) {
+      console.log(`[Hotels.com] ⚠️ Using hardcoded fallback location for: ${cleanQuery}`);
+      const result = [fallbackLocation];
+      this.regionCache.set(cacheKey, {
+        data: result,
+        timestamp: Date.now()
+      });
+      return result;
     }
 
     console.error(`[Hotels.com] All ${maxRetries} attempts failed for region search: ${cleanQuery}`);
