@@ -299,21 +299,60 @@ class HotelsService {
     } = options;
 
     return hotels.filter(hotel => {
-      // Extract rating
-      const rating = hotel.reviews?.score || hotel.starRating || 0;
+      // Extract rating - support both old and new API structures
+      let rating = 0;
+      if (hotel.summarySections?.[0]?.guestRatingSectionV2?.badge?.text) {
+        // New API structure
+        rating = parseFloat(hotel.summarySections[0].guestRatingSectionV2.badge.text) || 0;
+      } else {
+        // Old API structure
+        rating = hotel.reviews?.score || hotel.starRating || 0;
+      }
+
       if (rating < minRating && rating > 0) {
+        console.log(`[Hotels.com] Filtering out hotel with low rating: ${rating} < ${minRating}`);
         return false;
       }
 
-      // Extract review count
-      const reviewCount = hotel.reviews?.total || 0;
+      // Extract review count - support both old and new API structures
+      let reviewCount = 0;
+      if (hotel.summarySections?.[0]?.guestRatingSectionV2?.phrases?.[1]?.phraseParts?.[0]?.text) {
+        // New API structure - extract from phrases like "2,622 reviews"
+        const reviewPhrase = hotel.summarySections[0].guestRatingSectionV2.phrases[1].phraseParts[0].text || '';
+        const reviewMatch = reviewPhrase.match(/[\d,]+/);
+        if (reviewMatch) {
+          reviewCount = parseInt(reviewMatch[0].replace(/,/g, '')) || 0;
+        }
+      } else {
+        // Old API structure
+        reviewCount = hotel.reviews?.total || 0;
+      }
+
       if (reviewCount < minReviews) {
+        console.log(`[Hotels.com] Filtering out hotel with low reviews: ${reviewCount} < ${minReviews}`);
         return false;
       }
 
-      // Check price if available
-      if (maxPrice && hotel.price?.lead?.amount) {
-        if (hotel.price.lead.amount > maxPrice) {
+      // Check price if available - support both structures
+      if (maxPrice) {
+        let hotelPrice = 0;
+
+        // New API structure
+        if (hotel.priceSection?.priceSummary?.displayMessages?.[0]?.lineItems) {
+          const leadPrice = hotel.priceSection.priceSummary.displayMessages[0].lineItems.find(
+            item => item.role === 'LEAD'
+          );
+          if (leadPrice?.price?.formatted) {
+            const priceStr = leadPrice.price.formatted;
+            hotelPrice = parseFloat(priceStr.replace(/[^0-9.]/g, '')) || 0;
+          }
+        } else if (hotel.price?.lead?.amount) {
+          // Old API structure
+          hotelPrice = hotel.price.lead.amount;
+        }
+
+        if (hotelPrice > 0 && hotelPrice > maxPrice) {
+          console.log(`[Hotels.com] Filtering out hotel with high price: ${hotelPrice} > ${maxPrice}`);
           return false;
         }
       }
@@ -336,7 +375,15 @@ class HotelsService {
     }
 
     // Apply quality filters
-    const filteredHotels = this.filterHotels(searchResults.results, options);
+    console.log(`[Hotels.com] Filtering ${searchResults.results.length} hotels with options:`, options);
+    let filteredHotels = this.filterHotels(searchResults.results, options);
+    console.log(`[Hotels.com] After filtering: ${filteredHotels.length} hotels remaining`);
+
+    // If filtering removed all hotels, use unfiltered results (better to show something than nothing)
+    if (filteredHotels.length === 0 && searchResults.results.length > 0) {
+      console.log(`[Hotels.com] ⚠️ All hotels filtered out, using unfiltered results`);
+      filteredHotels = searchResults.results;
+    }
 
     // Format ALL filtered hotels so we can filter out $0 prices
     const formattedHotels = filteredHotels.map((hotel, index) => {
@@ -453,6 +500,8 @@ class HotelsService {
       }
       return true;
     });
+
+    console.log(`[Hotels.com] After price filtering: ${hotelsWithPrice.length}/${formattedHotels.length} hotels with valid prices`);
 
     // Get only the requested number of hotels
     const finalHotels = hotelsWithPrice.slice(0, limit);
