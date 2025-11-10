@@ -124,6 +124,10 @@ app.use('/links', linksRouter);
 const flightsRouter = require('./routes/flights');
 app.use('/flights', flightsRouter);
 
+// Aviasales white-label redirect endpoint
+const goFlightsRouter = require('./routes/goFlights');
+app.use('/go/flights', goFlightsRouter);
+
 // ARCHIVED: Old Flight search API endpoints (replaced by Duffel Links)
 app.post('/api/flights/search', async (req, res) => {
   try {
@@ -338,6 +342,16 @@ server.listen(PORT, '0.0.0.0', async () => {
   console.log('🔗 Duffel Links: http://localhost:' + PORT + '/links/session');
   console.log('📥 Duffel Webhooks: http://localhost:' + PORT + '/webhooks/duffel');
   console.log('✈️  Flight Search API: http://localhost:' + PORT + '/flights/search');
+
+  // Start Aviasales white-label health monitoring
+  const whiteLabelHealth = require('./services/whiteLabelHealthCheck');
+  if (process.env.AVIASALES_WL_HOST) {
+    whiteLabelHealth.start();
+    console.log('🏥 Aviasales White-Label Health Check: Started');
+    console.log('✈️  Flight Redirect Endpoint: http://localhost:' + PORT + '/go/flights');
+  } else {
+    console.log('⚠️ AVIASALES_WL_HOST not set - white-label monitoring disabled');
+  }
 
   // Test database connection and run migrations
   if (process.env.DATABASE_URL) {
