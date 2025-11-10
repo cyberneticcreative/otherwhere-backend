@@ -113,7 +113,26 @@ class HotelsService {
           timeout: 15000
         });
 
-        const rawResults = response.data?.data || response.data || [];
+        // Extract results and ensure it's an array
+        let rawResults = response.data?.data || response.data;
+
+        // Ensure rawResults is an array, not an object
+        if (!Array.isArray(rawResults)) {
+          console.log(`[Hotels.com] Response data is not an array, checking nested properties...`);
+          console.log(`[Hotels.com] Response structure:`, JSON.stringify(response.data, null, 2).substring(0, 1000));
+
+          // Try common nested paths
+          rawResults = response.data?.results
+            || response.data?.data?.results
+            || response.data?.locations
+            || response.data?.data?.locations
+            || [];
+        }
+
+        // Final safety check
+        if (!Array.isArray(rawResults)) {
+          rawResults = [];
+        }
 
         console.log(`[Hotels.com] Found ${rawResults.length} locations for "${query}"`);
 
