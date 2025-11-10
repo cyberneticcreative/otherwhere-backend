@@ -73,6 +73,31 @@ app.get('/r-stats', (req, res) => {
   res.json(stats);
 });
 
+// Hotels.com cache management (for debugging)
+const hotelsService = require('./services/hotelsService');
+
+app.get('/hotels/cache-stats', (req, res) => {
+  res.json({
+    message: 'Hotels.com cache stats',
+    note: 'Use /hotels/clear-cache to clear all cached data'
+  });
+});
+
+app.post('/hotels/clear-cache', (req, res) => {
+  try {
+    hotelsService.clearCache();
+    res.json({
+      success: true,
+      message: 'Hotels.com cache cleared successfully'
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 // Twilio webhooks
 app.post('/sms/inbound', smsController.handleInboundSMS);
 app.post('/sms/status', smsController.handleStatusCallback);

@@ -584,6 +584,24 @@ class HotelsService {
 
     return `${header}${hotelsList}\n\nReply 1-${formattedHotels.length} for booking link`;
   }
+
+  /**
+   * Clear all caches (for debugging)
+   */
+  clearCache() {
+    const regionCount = this.regionCache.size;
+    const hotelCount = this.hotelCache.size;
+
+    this.regionCache.clear();
+    this.hotelCache.clear();
+
+    console.log(`[Hotels.com] Cache cleared: ${regionCount} regions, ${hotelCount} hotel searches`);
+
+    return {
+      regionsCached: regionCount,
+      hotelsCached: hotelCount
+    };
+  }
 }
 
 module.exports = new HotelsService();
