@@ -1,18 +1,23 @@
 const axios = require('axios');
 
-const TRAVELPAYOUTS_TOKEN = process.env.TRAVELPAYOUTS_TOKEN;
+// Support both old and new env variable names
+const AVIASALES_TOKEN = process.env.AVIASALES_TOKEN || process.env.TRAVELPAYOUTS_TOKEN;
 const AVIASALES_MARKER = process.env.AVIASALES_MARKER;
 
 /**
- * TravelPayouts/Aviasales Flight Search Service
+ * Aviasales/TravelPayouts Flight Discovery Service
  *
- * ⚠️  CURRENTLY INACTIVE - NOT IN USE
- * Waiting for affiliate program approval from TravelPayouts/Aviasales.
+ * ⚠️  DISCOVERY ONLY - DO NOT USE FOR DIRECT BOOKING
  *
- * This service is kept for future use once API access is granted.
- * All flight searches currently use Google Flights API instead.
+ * This service uses the Aviasales API to discover flights for SMS/AI recommendations.
+ * Results should NEVER link directly to affiliate URLs from the API.
  *
- * See: googleFlightsService.js for the active implementation
+ * CORRECT FLOW:
+ * 1. Use this service to search flights and show options to user
+ * 2. When user wants to book, redirect to /go/flights with search params
+ * 3. /go/flights routes through white-label (book.otherwhere.world) for attribution
+ *
+ * See: /routes/goFlights.js for the booking redirect handler
  */
 class TravelPayoutsService {
   /**
@@ -21,21 +26,20 @@ class TravelPayoutsService {
    * @returns {Promise<Object>} Flight search results
    */
   async searchFlights(tripData) {
-    if (!TRAVELPAYOUTS_TOKEN || !AVIASALES_MARKER) {
-      throw new Error('TravelPayouts credentials not configured');
+    if (!AVIASALES_TOKEN || !AVIASALES_MARKER) {
+      throw new Error('Aviasales credentials not configured');
     }
 
     try {
       const { destination, startDate, endDate, travelers, budget } = tripData;
 
       // Parse destination and origin
-      // For now, we'll use a simple approach - you can enhance this with a city code lookup
       const originCity = this.extractCityCode(tripData.origin || 'LAX');
       const destCity = this.extractCityCode(destination);
 
-      console.log(`🔍 Searching flights: ${originCity} → ${destCity}`);
-      console.log(`📅 Dates: ${startDate} to ${endDate || 'one-way'}`);
-      console.log(`👥 Travelers: ${travelers || 1}`);
+      console.log(`[Aviasales] 🔍 Searching flights: ${originCity} → ${destCity}`);
+      console.log(`[Aviasales] 📅 Dates: ${startDate} to ${endDate || 'one-way'}`);
+      console.log(`[Aviasales] 👥 Travelers: ${travelers || 1}`);
 
       // TravelPayouts API v2 - has more cached data than v3
       // Using latest prices endpoint which returns actual cached flight data
@@ -45,7 +49,7 @@ class TravelPayoutsService {
         origin: originCity,
         destination: destCity,
         currency: budget?.currency || 'USD',
-        token: TRAVELPAYOUTS_TOKEN,
+        token: AVIASALES_TOKEN,
         limit: 10 // Get more results to filter
       };
 
@@ -54,9 +58,9 @@ class TravelPayoutsService {
         timeout: 10000
       });
 
-      console.log(`✅ Found ${response.data.data?.length || 0} flight options`);
+      console.log(`[Aviasales] ✅ Found ${response.data.data?.length || 0} flight options`);
 
-      // Format the results and add affiliate markers
+      // Format the results - DO NOT include direct affiliate links
       const flights = this.formatFlightResults(response.data.data || [], tripData);
 
       return {
@@ -71,10 +75,10 @@ class TravelPayoutsService {
       };
 
     } catch (error) {
-      console.error('TravelPayouts API Error:', error.message);
+      console.error('[Aviasales] API Error:', error.message);
 
       if (error.response) {
-        console.error('API Response:', error.response.data);
+        console.error('[Aviasales] API Response:', error.response.data);
       }
 
       throw new Error(`Failed to search flights: ${error.message}`);
@@ -138,9 +142,6 @@ class TravelPayoutsService {
       const price = flight.value || flight.price || 0;
       const currency = (tripData.budget?.currency || 'USD').toUpperCase();
 
-      // Generate affiliate booking link
-      const affiliateLink = this.generateAffiliateLink(flight, tripData);
-
       return {
         rank: index + 1,
         price: `$${price} ${currency}`,
@@ -148,51 +149,61 @@ class TravelPayoutsService {
         airline: flight.airline || 'Various',
         departure: flight.depart_date || tripData.startDate,
         returnDate: flight.return_date || tripData.endDate,
-        link: affiliateLink,
         duration: flight.duration || null,
-        transfers: flight.number_of_changes || 0
+        transfers: flight.number_of_changes || 0,
+        // DO NOT include direct affiliate link - use buildGoFlightsURL() instead
+        rawData: flight
       };
     });
   }
 
   /**
-   * Generate affiliate booking link for a flight
-   * @param {Object} flight - Flight data
+   * Build /go/flights URL for proper attribution
+   * ⚠️  ALWAYS use this instead of direct affiliate links
+   *
    * @param {Object} tripData - Search parameters
-   * @returns {string} Affiliate link
+   * @param {string} sessionId - Session ID for tracking
+   * @param {string} baseUrl - Base URL (defaults to production)
+   * @returns {string} /go/flights URL
    */
-  generateAffiliateLink(flight, tripData) {
-    if (!AVIASALES_MARKER) {
-      return null;
-    }
-
-    // Use the link from API response if available
-    if (flight.link) {
-      // Ensure our Aviasales marker is in the URL
-      const url = new URL(flight.link);
-      url.searchParams.set('marker', AVIASALES_MARKER);
-      return url.toString();
-    }
-
-    // Otherwise, construct Aviasales search link with affiliate marker
+  buildGoFlightsURL(tripData, sessionId = null, baseUrl = null) {
     const origin = this.extractCityCode(tripData.origin || 'LAX');
     const dest = this.extractCityCode(tripData.destination);
-    const depart = tripData.startDate;
-    const returnDate = tripData.endDate || '';
 
-    // Aviasales affiliate link format
-    let link = `https://www.aviasales.com/search/${origin}${depart}${dest}${returnDate}`;
-    link += `?marker=${AVIASALES_MARKER}`;
+    const params = new URLSearchParams({
+      o: origin,
+      d: dest,
+      dd: tripData.startDate,
+      ad: (tripData.travelers || tripData.adults || 1).toString(),
+      ch: (tripData.children || 0).toString(),
+      in: (tripData.infants || 0).toString(),
+      cls: tripData.travelClass?.charAt(0)?.toLowerCase() || 'e',
+      cur: tripData.budget?.currency || 'USD',
+      utm_source: 'sms'
+    });
 
-    return link;
+    // Add return date if provided
+    if (tripData.endDate) {
+      params.set('rd', tripData.endDate);
+    }
+
+    // Add session ID if provided
+    if (sessionId) {
+      params.set('sid', sessionId);
+    }
+
+    const base = baseUrl || process.env.BACKEND_WEBHOOK_URL || 'http://localhost:3000';
+    return `${base}/go/flights?${params.toString()}`;
   }
 
   /**
    * Format flight results as SMS message
    * @param {Object} searchResults - Flight search results
+   * @param {Object} tripData - Original trip data for building /go/flights URL
+   * @param {string} sessionId - Session ID for tracking
    * @returns {string} Formatted SMS message
    */
-  formatSMSMessage(searchResults) {
+  formatSMSMessage(searchResults, tripData, sessionId = null) {
     if (!searchResults.success || searchResults.flights.length === 0) {
       return "Sorry, I couldn't find any flights for your search. Try different dates or destinations!";
     }
@@ -205,7 +216,7 @@ class TravelPayoutsService {
     message += `${searchParams.origin} → ${searchParams.destination}\n`;
     message += `${searchParams.dates}\n\n`;
 
-    // List top 3 flights with booking links
+    // List top 3 flights
     flights.slice(0, 3).forEach(flight => {
       message += `${flight.rank}. ${flight.price}`;
       if (flight.transfers > 0) {
@@ -214,22 +225,20 @@ class TravelPayoutsService {
       message += `\n`;
     });
 
-    // Add booking link for best deal
-    if (topFlight.link) {
-      message += `\n🔗 Book now: ${topFlight.link}`;
-    }
-
-    message += `\n\n💡 Click the link to book your flight!`;
+    // Add /go/flights booking link (routes through white-label)
+    const bookingUrl = this.buildGoFlightsURL(tripData, sessionId);
+    message += `\n🔗 Book now: ${bookingUrl}`;
+    message += `\n\n💡 Click the link to view all options!`;
 
     return message;
   }
 
   /**
-   * Check if TravelPayouts is configured
+   * Check if Aviasales is configured
    * @returns {boolean} True if configured
    */
   isConfigured() {
-    return !!(TRAVELPAYOUTS_TOKEN && AVIASALES_MARKER);
+    return !!(AVIASALES_TOKEN && AVIASALES_MARKER);
   }
 }
 
