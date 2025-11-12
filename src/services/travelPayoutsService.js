@@ -387,18 +387,18 @@ class TravelPayoutsService {
     const originCode = this.extractCityCode(origin);
     const destCode = this.extractCityCode(destination);
 
-    // Format dates as MMDD (e.g., 1215 for Dec 15)
+    // Format dates as DDMM (e.g., 1411 for Nov 14)
+    // Example: YVR1411NYC16121 = YVR Nov-14 to NYC Dec-16, 1 traveler
     const formatDate = (dateStr) => {
-      const date = new Date(dateStr);
-      const month = String(date.getMonth() + 1).padStart(2, '0');
-      const day = String(date.getDate()).padStart(2, '0');
-      return `${month}${day}`;
+      // Parse YYYY-MM-DD directly to avoid timezone issues
+      const [year, month, day] = dateStr.split('-');
+      return `${day}${month}`;
     };
 
     const departDate = formatDate(startDate);
     const returnDate = endDate ? formatDate(endDate) : '';
 
-    // Build flightSearch parameter: "YYZ1215CDG12191"
+    // Build flightSearch parameter: "YVR1411NYC16121" (origin + DDMM + dest + DDMM + travelers)
     const flightSearch = `${originCode}${departDate}${destCode}${returnDate}${travelers || 1}`;
 
     const params = new URLSearchParams({
