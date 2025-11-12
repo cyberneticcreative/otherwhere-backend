@@ -45,35 +45,56 @@ class TravelPayoutsService {
     }
 
     try {
-      const { destination, startDate, endDate, travelers, budget } = tripData;
+      // === NORMALIZE INPUT DATA ===
+      // Handle both check_in/check_out AND startDate/endDate formats
+      const departDate = tripData.startDate || tripData.check_in || tripData.depart_date;
+      const returnDate = tripData.endDate || tripData.check_out || tripData.return_date;
+      const destination = tripData.destination;
+      const origin = tripData.origin;
+      const travelers = tripData.travelers || tripData.adults || 1;
+      const budget = tripData.budget;
 
-      // Parse destination and origin
-      const originCity = this.extractCityCode(tripData.origin || 'LAX');
+      // === VALIDATION: Check required fields ===
+      if (!origin || !destination) {
+        throw new Error('Missing origin or destination');
+      }
+
+      if (!departDate) {
+        throw new Error('Missing departure date. Please specify dates like "Dec 15-19"');
+      }
+
+      // Parse destination and origin codes
+      const originCity = this.extractCityCode(origin);
       const destCity = this.extractCityCode(destination);
 
       console.log(`[Aviasales] 🔍 Searching flights: ${originCity} → ${destCity}`);
-      console.log(`[Aviasales] 📅 Dates: ${startDate} to ${endDate || 'one-way'}`);
-      console.log(`[Aviasales] 👥 Travelers: ${travelers || 1}`);
+      console.log(`[Aviasales] 📅 Dates: ${departDate} to ${returnDate || 'one-way'}`);
+      console.log(`[Aviasales] 👥 Travelers: ${travelers}`);
 
-      // Build directions array for the API
+      // === BUILD DIRECTIONS ARRAY (NEVER MUTATE AFTER THIS) ===
       const directions = [
         {
           origin: originCity,
           destination: destCity,
-          date: startDate
+          date: departDate
         }
       ];
 
       // Add return leg if it's a round trip
-      if (endDate) {
+      if (returnDate) {
         directions.push({
           origin: destCity,
           destination: originCity,
-          date: endDate
+          date: returnDate
         });
       }
 
-      // Build request body
+      // === VALIDATION: Ensure directions is valid ===
+      if (!Array.isArray(directions) || directions.length < 1) {
+        throw new Error('No valid directions built. Check your dates and destinations.');
+      }
+
+      // === BUILD REQUEST BODY ===
       const requestBody = {
         marker: AVIASALES_MARKER,
         market_code: 'us', // Default to US market
@@ -89,6 +110,9 @@ class TravelPayoutsService {
         },
         directions
       };
+
+      // === LOG PAYLOAD FOR DEBUGGING ===
+      console.log(`[Aviasales] 📦 Request payload:`, JSON.stringify(requestBody, null, 2));
 
       // Generate signature
       const signature = this.generateSignature(requestBody);
@@ -262,6 +286,10 @@ class TravelPayoutsService {
       return [];
     }
 
+    // Normalize field names
+    const startDate = tripData.startDate || tripData.check_in || tripData.depart_date;
+    const endDate = tripData.endDate || tripData.check_out || tripData.return_date;
+
     // Sort by total price
     const sorted = proposals.sort((a, b) => {
       const priceA = a.terms?.price?.total?.amount || 0;
@@ -287,8 +315,8 @@ class TravelPayoutsService {
         price: `$${Math.round(price)} ${currency}`,
         priceValue: price,
         airline: airline,
-        departure: tripData.startDate,
-        returnDate: tripData.endDate,
+        departure: startDate,
+        returnDate: endDate,
         duration: null, // Can be calculated from segments if needed
         transfers: totalStops,
         // Extract direct affiliate link from proposal (PRIORITY #1)
@@ -305,7 +333,12 @@ class TravelPayoutsService {
    * @returns {string} White-label booking URL
    */
   buildWhiteLabelURL(tripData, sessionId = null) {
-    const { origin, destination, startDate, endDate, travelers } = tripData;
+    // Normalize field names
+    const origin = tripData.origin;
+    const destination = tripData.destination;
+    const startDate = tripData.startDate || tripData.check_in || tripData.depart_date;
+    const endDate = tripData.endDate || tripData.check_out || tripData.return_date;
+    const travelers = tripData.travelers || tripData.adults || 1;
 
     // Extract airport codes
     const originCode = this.extractCityCode(origin);
@@ -347,13 +380,17 @@ class TravelPayoutsService {
    * @returns {string} /go/flights URL
    */
   buildGoFlightsURL(tripData, sessionId = null, baseUrl = null) {
+    // Normalize field names
+    const startDate = tripData.startDate || tripData.check_in || tripData.depart_date;
+    const endDate = tripData.endDate || tripData.check_out || tripData.return_date;
+
     const origin = this.extractCityCode(tripData.origin || 'LAX');
     const dest = this.extractCityCode(tripData.destination);
 
     const params = new URLSearchParams({
       o: origin,
       d: dest,
-      dd: tripData.startDate,
+      dd: startDate,
       ad: (tripData.travelers || tripData.adults || 1).toString(),
       ch: (tripData.children || 0).toString(),
       in: (tripData.infants || 0).toString(),
@@ -363,8 +400,8 @@ class TravelPayoutsService {
     });
 
     // Add return date if provided
-    if (tripData.endDate) {
-      params.set('rd', tripData.endDate);
+    if (endDate) {
+      params.set('rd', endDate);
     }
 
     // Add session ID if provided
