@@ -134,7 +134,12 @@ class TravelPayoutsService {
       // Real-time search API endpoint
       const apiUrl = 'https://tickets-api.travelpayouts.com/search/affiliate/start';
 
+      console.log(`[Aviasales] 🔐 Signature:`, signature);
+      console.log(`[Aviasales] 🔑 Using token:`, AVIASALES_TOKEN?.substring(0, 8) + '...');
+      console.log(`[Aviasales] 🏷️  Using marker:`, AVIASALES_MARKER);
+      console.log(`[Aviasales] 🌐 WL Host:`, AVIASALES_WL_HOST);
       console.log(`[Aviasales] 🚀 Starting real-time search...`);
+      console.log(`[Aviasales] 📤 FINAL payload being sent to axios:`, JSON.stringify(requestBody, null, 2));
 
       const response = await axios.post(apiUrl, requestBody, {
         headers: {
