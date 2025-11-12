@@ -93,14 +93,12 @@ class TravelPayoutsService {
   extractCityCode(cityName) {
     // Common city mappings
     const cityMap = {
+      // North America
       'los angeles': 'LAX',
       'la': 'LAX',
       'new york': 'NYC',
       'nyc': 'NYC',
       'new york city': 'NYC',
-      'paris': 'PAR',
-      'london': 'LON',
-      'tokyo': 'TYO',
       'san francisco': 'SFO',
       'sf': 'SFO',
       'chicago': 'CHI',
@@ -112,13 +110,35 @@ class TravelPayoutsService {
       'toronto': 'YTO',
       'vancouver': 'YVR',
       'montreal': 'YUL',
+
+      // Europe
+      'paris': 'PAR',
+      'london': 'LON',
       'dublin': 'DUB',
       'barcelona': 'BCN',
       'rome': 'ROM',
       'amsterdam': 'AMS',
       'berlin': 'BER',
       'madrid': 'MAD',
-      'lisbon': 'LIS'
+      'lisbon': 'LIS',
+
+      // Asia
+      'tokyo': 'TYO',
+      'hong kong': 'HKG',
+      'hk': 'HKG',
+      'singapore': 'SIN',
+      'bangkok': 'BKK',
+      'seoul': 'SEL',
+      'shanghai': 'SHA',
+      'beijing': 'BJS',
+      'taipei': 'TPE',
+      'manila': 'MNL',
+      'kuala lumpur': 'KUL',
+      'jakarta': 'JKT',
+      'delhi': 'DEL',
+      'mumbai': 'BOM',
+      'dubai': 'DXB',
+      'doha': 'DOH'
     };
 
     const normalized = cityName.toLowerCase().trim();
