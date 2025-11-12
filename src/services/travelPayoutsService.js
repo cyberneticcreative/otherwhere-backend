@@ -95,24 +95,38 @@ class TravelPayoutsService {
       }
 
       // === BUILD REQUEST BODY ===
+      // Build passengers object first
+      const passengers = {
+        adults: parseInt(travelers) || 1,
+        children: 0,
+        infants: 0
+      };
+
+      // Build search_params object
+      const searchParams = {
+        trip_class: tripData.travelClass === 'business' ? 'C' : 'Y',
+        passengers: passengers
+      };
+
+      // Build final request body (directions MUST be top-level)
       const requestBody = {
         marker: AVIASALES_MARKER,
-        market_code: 'us', // Default to US market
+        market_code: 'us',
         locale: 'en',
         currency_code: budget?.currency || 'USD',
-        search_params: {
-          trip_class: tripData.travelClass === 'business' ? 'C' : 'Y',
-          passengers: {
-            adults: parseInt(travelers) || 1,
-            children: 0,
-            infants: 0
-          }
-        },
-        directions
+        search_params: searchParams,
+        directions: directions  // Explicitly named field
       };
 
       // === LOG PAYLOAD FOR DEBUGGING ===
-      console.log(`[Aviasales] 📦 Request payload:`, JSON.stringify(requestBody, null, 2));
+      console.log(`[Aviasales] 🔍 Directions array:`, JSON.stringify(directions, null, 2));
+      console.log(`[Aviasales] 👥 Passengers:`, JSON.stringify(passengers, null, 2));
+      console.log(`[Aviasales] 📦 Full request payload:`, JSON.stringify(requestBody, null, 2));
+
+      // Validate before sending
+      if (!requestBody.directions || requestBody.directions.length === 0) {
+        throw new Error('FATAL: directions array is empty in final payload');
+      }
 
       // Generate signature
       const signature = this.generateSignature(requestBody);
