@@ -128,79 +128,54 @@ class TravelPayoutsService {
         throw new Error('FATAL: directions array is empty in final payload');
       }
 
-      // Generate signature
-      const signature = this.generateSignature(requestBody);
+      // Use Data API (publicly available, no special access needed)
+      // Real-time Search API requires approval - using prices_for_dates instead
+      const apiUrl = 'https://api.travelpayouts.com/aviasales/v3/prices_for_dates';
 
-      // Real-time search API endpoint
-      const apiUrl = 'https://tickets-api.travelpayouts.com/search/affiliate/start';
+      const params = {
+        origin: originCity,
+        destination: destCity,
+        departure_at: departDate,
+        return_at: returnDate || undefined,
+        currency: budget?.currency || 'USD',
+        token: AVIASALES_TOKEN,
+        sorting: 'price', // Sort by cheapest first
+        limit: 30 // Get more results
+      };
 
-      console.log(`[Aviasales] 🔐 Signature:`, signature);
       console.log(`[Aviasales] 🔑 Using token:`, AVIASALES_TOKEN?.substring(0, 8) + '...');
       console.log(`[Aviasales] 🏷️  Using marker:`, AVIASALES_MARKER);
       console.log(`[Aviasales] 🌐 WL Host:`, AVIASALES_WL_HOST);
-      console.log(`[Aviasales] 🚀 Starting real-time search...`);
-      console.log(`[Aviasales] 📤 FINAL payload being sent to axios:`, JSON.stringify(requestBody, null, 2));
+      console.log(`[Aviasales] 🚀 Using Data API (prices_for_dates)...`);
+      console.log(`[Aviasales] 📦 Request params:`, JSON.stringify(params, null, 2));
 
-      const response = await axios.post(apiUrl, requestBody, {
-        headers: {
-          'x-affiliate-user-id': AVIASALES_TOKEN,
-          'x-real-host': AVIASALES_WL_HOST, // White-label domain (book.otherwhere.world)
-          'x-user-ip': tripData.userIp || '127.0.0.1', // Use real user IP if available
-          'x-signature': signature,
-          'Content-Type': 'application/json'
-        },
+      const response = await axios.get(apiUrl, {
+        params,
         timeout: 15000
       });
 
-      console.log(`[Aviasales] ✅ Search initiated, response:`, response.data);
-
-      // Check if we got a search_id to poll
-      if (response.data.search_id) {
-        console.log(`[Aviasales] 🔄 Polling for results with search_id: ${response.data.search_id}`);
-
-        // Poll for results (wait 2-3 seconds for results to be ready)
-        await new Promise(resolve => setTimeout(resolve, 3000));
-
-        const resultsUrl = `https://tickets-api.travelpayouts.com/search/affiliate/results/${response.data.search_id}`;
-        const resultsResponse = await axios.get(resultsUrl, {
-          headers: {
-            'x-affiliate-user-id': AVIASALES_TOKEN
-          },
-          timeout: 10000
-        });
-
-        console.log(`[Aviasales] ✅ Found ${resultsResponse.data?.proposals?.length || 0} flight options`);
-
-        // Format the results
-        const flights = this.formatRealTimeResults(resultsResponse.data?.proposals || [], tripData);
-
-        return {
-          success: true,
-          flights,
-          searchParams: {
-            origin: originCity,
-            destination: destCity,
-            dates: `${startDate} - ${endDate || 'one-way'}`,
-            travelers: travelers || 1
-          }
-        };
-      } else {
-        // No search_id returned, check if results are inline
-        const flights = this.formatRealTimeResults(response.data?.proposals || [], tripData);
-
-        console.log(`[Aviasales] ✅ Found ${flights.length} flight options`);
-
-        return {
-          success: true,
-          flights,
-          searchParams: {
-            origin: originCity,
-            destination: destCity,
-            dates: `${startDate} - ${endDate || 'one-way'}`,
-            travelers: travelers || 1
-          }
-        };
+      // Data API returns results directly (no polling needed)
+      if (!response.data?.success) {
+        console.log(`[Aviasales] ❌ API error:`, response.data);
+        throw new Error('API returned success: false');
       }
+
+      const flightData = response.data.data || [];
+      console.log(`[Aviasales] ✅ Found ${flightData.length} flight options`);
+
+      // Format the results using Data API format
+      const flights = this.formatDataAPIResults(flightData, tripData);
+
+      return {
+        success: true,
+        flights,
+        searchParams: {
+          origin: originCity,
+          destination: destCity,
+          dates: `${departDate} - ${returnDate || 'one-way'}`,
+          travelers: travelers || 1
+        }
+      };
 
     } catch (error) {
       console.error('[Aviasales] API Error:', error.message);
@@ -295,7 +270,49 @@ class TravelPayoutsService {
   }
 
   /**
-   * Format real-time API proposals for user display
+   * Format Data API results for user display
+   * @param {Array} flights - Flight data from Data API
+   * @param {Object} tripData - Original search parameters
+   * @returns {Array} Formatted flight results
+   */
+  formatDataAPIResults(flights, tripData) {
+    if (!flights || flights.length === 0) {
+      return [];
+    }
+
+    // Normalize field names
+    const startDate = tripData.startDate || tripData.check_in || tripData.depart_date;
+    const endDate = tripData.endDate || tripData.check_out || tripData.return_date;
+
+    // Sort by price
+    const sorted = flights.sort((a, b) => (a.price || 0) - (b.price || 0));
+
+    return sorted.slice(0, 5).map((flight, index) => {
+      const price = flight.price || 0;
+      const currency = flight.currency || tripData.budget?.currency || 'USD';
+
+      // Data API format: transfers, airline
+      const airline = flight.airline || 'Various';
+      const transfers = flight.transfers || 0;
+
+      return {
+        rank: index + 1,
+        price: `$${Math.round(price)} ${currency}`,
+        priceValue: price,
+        airline: airline,
+        departure: startDate,
+        returnDate: endDate,
+        duration: flight.duration || null,
+        transfers: transfers,
+        // Extract link if available (Data API may include gate links)
+        affiliateLink: flight.link || null,
+        rawData: flight
+      };
+    });
+  }
+
+  /**
+   * Format real-time API proposals for user display (DEPRECATED - needs special access)
    * @param {Array} proposals - Proposals from real-time API
    * @param {Object} tripData - Original search parameters
    * @returns {Array} Formatted flight results
