@@ -2,7 +2,7 @@ const twilioService = require('../services/twilioService');
 const llmService = require('../services/llmService');
 const assistantService = require('../services/assistantService');
 const sessionManager = require('../services/sessionManager');
-const airlineDeepLinksService = require('../services/airlineDeepLinksService');
+const travelPayoutsService = require('../services/travelPayoutsService');
 const airbnbService = require('../services/airbnbService');
 
 class SMSController {
@@ -176,23 +176,45 @@ class SMSController {
       const smsDuration = Date.now() - smsStartTime;
       console.log(`⏱️  SMS send took ${smsDuration}ms`);
 
-      // If we have flight results, send them with airline deeplinks
+      // If we have flight results, send them with whitelabel booking link
       if (flightResults && flightResults.flights && flightResults.flights.length > 0) {
-        console.log('✈️ Sending flight results with airline deeplinks...');
+        console.log('✈️ Sending flight results with whitelabel booking link...');
 
         try {
-          // Format SMS message with flight options and airline deeplinks
-          const flightMessage = await airlineDeepLinksService.formatSMSWithLinks(
-            flightResults.flights,
-            {
-              origin: flightResults.originCode,
-              destination: flightResults.destCode,
-              departure: flightResults.searchParams?.outboundDate,
-              returnDate: flightResults.searchParams?.returnDate,
-              passengers: flightResults.searchParams?.passengers || 1,
-              cabin: flightResults.searchParams?.cabinClass || 'economy'
+          // Build whitelabel booking URL
+          const tripData = {
+            origin: flightResults.originCode,
+            destination: flightResults.destCode,
+            startDate: flightResults.searchParams?.outboundDate,
+            endDate: flightResults.searchParams?.returnDate,
+            travelers: flightResults.searchParams?.passengers || 1,
+            travelClass: flightResults.searchParams?.cabinClass || 'economy',
+            budget: {
+              currency: flightResults.searchParams?.currency || 'USD'
             }
-          );
+          };
+
+          const bookingUrl = travelPayoutsService.buildGoFlightsURL(tripData, from);
+
+          // Format flight message with whitelabel link
+          const topFlight = flightResults.flights[0];
+          let flightMessage = `✈️ Found ${flightResults.flights.length} flight${flightResults.flights.length > 1 ? 's' : ''}!\n\n`;
+
+          // Show top 3 flights
+          flightResults.flights.slice(0, 3).forEach((flight, idx) => {
+            const price = flight.price || `$${flight.priceValue || 'N/A'}`;
+            flightMessage += `${idx + 1}. ${price}`;
+            if (flight.stops || flight.transfers) {
+              const stops = flight.stops || flight.transfers;
+              flightMessage += ` (${stops} stop${stops > 1 ? 's' : ''})`;
+            }
+            if (flight.airline) {
+              flightMessage += ` - ${flight.airline}`;
+            }
+            flightMessage += `\n`;
+          });
+
+          flightMessage += `\n🔗 Book now: ${bookingUrl}`;
 
           // Store flight results in session for reference
           await sessionManager.updateSession(from, {
@@ -212,7 +234,7 @@ class SMSController {
           // Send flight results as a second SMS (no delay needed, async send)
           twilioService.sendLongSMS(from, flightMessage)
             .then(() => {
-              console.log('✅ Flight results with airline deeplinks sent');
+              console.log('✅ Flight results with whitelabel booking link sent');
             })
             .catch((smsError) => {
               console.error('❌ Failed to send flight results SMS:', smsError);
