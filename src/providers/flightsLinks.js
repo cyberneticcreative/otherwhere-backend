@@ -28,6 +28,14 @@ function mapCabinClass(cls) {
 /**
  * Build Aviasales White-Label URL (primary booking method)
  *
+ * Uses compact flightSearch format: ?flightSearch=YVR0912YTO11121
+ * Format breakdown:
+ * - Origin code (3 chars): YVR
+ * - Departure date MMDD (4 chars): 0912
+ * - Destination code (3 chars): YTO
+ * - Return date MMDD (4 chars): 1112 (optional for round-trip)
+ * - Total passengers (1+ chars): 1
+ *
  * @param {Object} params - Search parameters
  * @param {string} params.o - Origin IATA code
  * @param {string} params.d - Destination IATA code
@@ -58,34 +66,27 @@ function buildWhiteLabelURL(params) {
   // Base URL to white-label host
   const baseUrl = `https://${AVIASALES_WL_HOST}`;
 
-  // Build search path
-  // Format: /origin{depart_date}destination{return_date}
-  // Example: /YYZ0212LIS0220 for YYZ→LIS departing Feb 12, returning Feb 20
+  // Build compact flightSearch string
+  // Format: ORIGIN + MMDD + DESTINATION + [MMDD] + PASSENGERS
   const departMonth = dd.substring(5, 7);
   const departDay = dd.substring(8, 10);
 
-  let searchPath = `/${o}${departMonth}${departDay}${d}`;
+  let flightSearch = `${o}${departMonth}${departDay}${d}`;
 
   // Add return date if provided (round-trip)
   if (rd) {
     const returnMonth = rd.substring(5, 7);
     const returnDay = rd.substring(8, 10);
-    searchPath += `${returnMonth}${returnDay}`;
+    flightSearch += `${returnMonth}${returnDay}`;
   }
+
+  // Add total passenger count at the end
+  const totalPassengers = ad + ch + infants;
+  flightSearch += totalPassengers.toString();
 
   // Build query parameters
   const queryParams = new URLSearchParams();
-
-  // Passenger counts
-  queryParams.set('adults', ad.toString());
-  if (ch > 0) queryParams.set('children', ch.toString());
-  if (infants > 0) queryParams.set('infants', infants.toString());
-
-  // Trip class
-  queryParams.set('trip_class', mapCabinClass(cls));
-
-  // Currency
-  queryParams.set('currency', cur.toUpperCase());
+  queryParams.set('flightSearch', flightSearch);
 
   // Attribution (required for commission tracking)
   if (AVIASALES_MARKER) {
@@ -97,7 +98,23 @@ function buildWhiteLabelURL(params) {
     queryParams.set('subid', `ow_${sid}`);
   }
 
-  return `${baseUrl}${searchPath}?${queryParams.toString()}`;
+  // Add optional parameters only if they differ from defaults
+  if (cur !== 'USD') {
+    queryParams.set('currency', cur.toUpperCase());
+  }
+
+  if (cls !== 'e') {
+    queryParams.set('trip_class', mapCabinClass(cls));
+  }
+
+  // Include passenger breakdown if there are children or infants
+  if (ch > 0 || infants > 0) {
+    queryParams.set('adults', ad.toString());
+    if (ch > 0) queryParams.set('children', ch.toString());
+    if (infants > 0) queryParams.set('infants', infants.toString());
+  }
+
+  return `${baseUrl}/?${queryParams.toString()}`;
 }
 
 /**
