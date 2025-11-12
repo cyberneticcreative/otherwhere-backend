@@ -197,24 +197,32 @@ class SMSController {
           const bookingUrl = travelPayoutsService.buildGoFlightsURL(tripData, from);
 
           // Format flight message with whitelabel link
-          const topFlight = flightResults.flights[0];
           let flightMessage = `✈️ Found ${flightResults.flights.length} flight${flightResults.flights.length > 1 ? 's' : ''}!\n\n`;
 
           // Show top 3 flights
           flightResults.flights.slice(0, 3).forEach((flight, idx) => {
-            const price = flight.price || `$${flight.priceValue || 'N/A'}`;
+            // Extract price
+            const priceValue = flight.priceValue || flight.price || 0;
+            const price = `$${Math.round(priceValue)}`;
+
             flightMessage += `${idx + 1}. ${price}`;
-            if (flight.stops || flight.transfers) {
-              const stops = flight.stops || flight.transfers;
+
+            // Add stops if available
+            const stops = flight.transfers || flight.stops || 0;
+            if (stops > 0) {
               flightMessage += ` (${stops} stop${stops > 1 ? 's' : ''})`;
+            } else {
+              flightMessage += ` (Direct)`;
             }
-            if (flight.airline) {
-              flightMessage += ` - ${flight.airline}`;
-            }
+
+            // Add airline if available
+            const airline = flight.airline || 'Various';
+            flightMessage += ` - ${airline}`;
+
             flightMessage += `\n`;
           });
 
-          flightMessage += `\n🔗 Book now: ${bookingUrl}`;
+          flightMessage += `\n🔗 Book: ${bookingUrl}`;
 
           // Store flight results in session for reference
           await sessionManager.updateSession(from, {

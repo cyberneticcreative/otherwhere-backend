@@ -102,6 +102,7 @@ class TravelPayoutsService {
       'london': 'LON',
       'tokyo': 'TYO',
       'san francisco': 'SFO',
+      'sf': 'SFO',
       'chicago': 'CHI',
       'miami': 'MIA',
       'boston': 'BOS',
@@ -110,7 +111,14 @@ class TravelPayoutsService {
       'orlando': 'ORL',
       'toronto': 'YTO',
       'vancouver': 'YVR',
-      'montreal': 'YMQ'
+      'montreal': 'YUL',
+      'dublin': 'DUB',
+      'barcelona': 'BCN',
+      'rome': 'ROM',
+      'amsterdam': 'AMS',
+      'berlin': 'BER',
+      'madrid': 'MAD',
+      'lisbon': 'LIS'
     };
 
     const normalized = cityName.toLowerCase().trim();
@@ -192,7 +200,10 @@ class TravelPayoutsService {
       params.set('sid', sessionId);
     }
 
-    const base = baseUrl || process.env.BACKEND_WEBHOOK_URL || 'http://localhost:3000';
+    // Get base URL and strip any trailing /webhook path
+    let base = baseUrl || process.env.BACKEND_WEBHOOK_URL || 'http://localhost:3000';
+    base = base.replace(/\/webhook\/?$/, ''); // Remove /webhook or /webhook/ from end
+
     return `${base}/go/flights?${params.toString()}`;
   }
 
