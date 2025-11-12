@@ -381,7 +381,12 @@ class TravelPayoutsService {
     const destination = tripData.destination;
     const startDate = tripData.startDate || tripData.check_in || tripData.depart_date;
     const endDate = tripData.endDate || tripData.check_out || tripData.return_date;
-    const travelers = tripData.travelers || tripData.adults || 1;
+
+    // Calculate total travelers (adults + children + infants)
+    let travelers = tripData.travelers || 1;
+    if (tripData.adults || tripData.children || tripData.infants) {
+      travelers = (tripData.adults || 0) + (tripData.children || 0) + (tripData.infants || 0);
+    }
 
     // Extract airport codes
     const originCode = this.extractCityCode(origin);
@@ -408,6 +413,20 @@ class TravelPayoutsService {
 
     if (sessionId) {
       params.set('subid', `ow_${sessionId}`);
+    }
+
+    // Add cabin class if specified (economy, business, first)
+    // TravelPayouts widget may support 'cabin_class' parameter
+    if (tripData.travelClass) {
+      // Map to TravelPayouts format
+      const cabinMap = {
+        'economy': 'Y',
+        'business': 'C',
+        'first': 'F',
+        'premium economy': 'W'
+      };
+      const cabin = cabinMap[tripData.travelClass.toLowerCase()] || 'Y';
+      params.set('cabin_class', cabin);
     }
 
     return `https://${AVIASALES_WL_HOST}/?${params.toString()}`;
