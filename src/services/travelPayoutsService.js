@@ -1,8 +1,10 @@
 const axios = require('axios');
+const crypto = require('crypto');
 
 // Support both old and new env variable names
 const AVIASALES_TOKEN = process.env.AVIASALES_TOKEN || process.env.TRAVELPAYOUTS_TOKEN;
 const AVIASALES_MARKER = process.env.AVIASALES_MARKER;
+const AVIASALES_WL_HOST = process.env.AVIASALES_WL_HOST || 'book.otherwhere.world';
 
 /**
  * Aviasales/TravelPayouts Flight Discovery Service
@@ -21,7 +23,19 @@ const AVIASALES_MARKER = process.env.AVIASALES_MARKER;
  */
 class TravelPayoutsService {
   /**
-   * Search for flights based on trip parameters
+   * Generate MD5 signature for API authentication
+   * @param {Object} requestBody - Request body object
+   * @returns {string} MD5 signature
+   */
+  generateSignature(requestBody) {
+    // Signature = MD5(token:marker:directions_json)
+    const directionsJson = JSON.stringify(requestBody.directions);
+    const signatureString = `${AVIASALES_TOKEN}:${AVIASALES_MARKER}:${directionsJson}`;
+    return crypto.createHash('md5').update(signatureString).digest('hex');
+  }
+
+  /**
+   * Search for flights based on trip parameters (REAL-TIME API)
    * @param {Object} tripData - Trip search parameters
    * @returns {Promise<Object>} Flight search results
    */
@@ -41,44 +55,116 @@ class TravelPayoutsService {
       console.log(`[Aviasales] 📅 Dates: ${startDate} to ${endDate || 'one-way'}`);
       console.log(`[Aviasales] 👥 Travelers: ${travelers || 1}`);
 
-      // TravelPayouts API v2 - has more cached data than v3
-      // Using latest prices endpoint which returns actual cached flight data
-      const apiUrl = 'https://api.travelpayouts.com/v2/prices/latest';
-
-      const params = {
-        origin: originCity,
-        destination: destCity,
-        currency: budget?.currency || 'USD',
-        token: AVIASALES_TOKEN,
-        limit: 10 // Get more results to filter
-      };
-
-      const response = await axios.get(apiUrl, {
-        params,
-        timeout: 10000
-      });
-
-      console.log(`[Aviasales] ✅ Found ${response.data.data?.length || 0} flight options`);
-
-      // Format the results - DO NOT include direct affiliate links
-      const flights = this.formatFlightResults(response.data.data || [], tripData);
-
-      return {
-        success: true,
-        flights,
-        searchParams: {
+      // Build directions array for the API
+      const directions = [
+        {
           origin: originCity,
           destination: destCity,
-          dates: `${startDate} - ${endDate || 'one-way'}`,
-          travelers: travelers || 1
+          date: startDate
         }
+      ];
+
+      // Add return leg if it's a round trip
+      if (endDate) {
+        directions.push({
+          origin: destCity,
+          destination: originCity,
+          date: endDate
+        });
+      }
+
+      // Build request body
+      const requestBody = {
+        marker: AVIASALES_MARKER,
+        market_code: 'us', // Default to US market
+        locale: 'en',
+        currency_code: budget?.currency || 'USD',
+        search_params: {
+          trip_class: tripData.travelClass === 'business' ? 'C' : 'Y',
+          passengers: {
+            adults: parseInt(travelers) || 1,
+            children: 0,
+            infants: 0
+          }
+        },
+        directions
       };
+
+      // Generate signature
+      const signature = this.generateSignature(requestBody);
+
+      // Real-time search API endpoint
+      const apiUrl = 'https://tickets-api.travelpayouts.com/search/affiliate/start';
+
+      console.log(`[Aviasales] 🚀 Starting real-time search...`);
+
+      const response = await axios.post(apiUrl, requestBody, {
+        headers: {
+          'x-affiliate-user-id': AVIASALES_TOKEN,
+          'x-real-host': AVIASALES_WL_HOST,
+          'x-user-ip': '127.0.0.1', // Default fallback, should be passed from request
+          'x-signature': signature,
+          'Content-Type': 'application/json'
+        },
+        timeout: 15000
+      });
+
+      console.log(`[Aviasales] ✅ Search initiated, response:`, response.data);
+
+      // Check if we got a search_id to poll
+      if (response.data.search_id) {
+        console.log(`[Aviasales] 🔄 Polling for results with search_id: ${response.data.search_id}`);
+
+        // Poll for results (wait 2-3 seconds for results to be ready)
+        await new Promise(resolve => setTimeout(resolve, 3000));
+
+        const resultsUrl = `https://tickets-api.travelpayouts.com/search/affiliate/results/${response.data.search_id}`;
+        const resultsResponse = await axios.get(resultsUrl, {
+          headers: {
+            'x-affiliate-user-id': AVIASALES_TOKEN
+          },
+          timeout: 10000
+        });
+
+        console.log(`[Aviasales] ✅ Found ${resultsResponse.data?.proposals?.length || 0} flight options`);
+
+        // Format the results
+        const flights = this.formatRealTimeResults(resultsResponse.data?.proposals || [], tripData);
+
+        return {
+          success: true,
+          flights,
+          searchParams: {
+            origin: originCity,
+            destination: destCity,
+            dates: `${startDate} - ${endDate || 'one-way'}`,
+            travelers: travelers || 1
+          }
+        };
+      } else {
+        // No search_id returned, check if results are inline
+        const flights = this.formatRealTimeResults(response.data?.proposals || [], tripData);
+
+        console.log(`[Aviasales] ✅ Found ${flights.length} flight options`);
+
+        return {
+          success: true,
+          flights,
+          searchParams: {
+            origin: originCity,
+            destination: destCity,
+            dates: `${startDate} - ${endDate || 'one-way'}`,
+            travelers: travelers || 1
+          }
+        };
+      }
 
     } catch (error) {
       console.error('[Aviasales] API Error:', error.message);
 
       if (error.response) {
-        console.error('[Aviasales] API Response:', error.response.data);
+        console.error('[Aviasales] API Response Status:', error.response.status);
+        console.error('[Aviasales] API Response Data:', JSON.stringify(error.response.data).substring(0, 500));
       }
 
       throw new Error(`Failed to search flights: ${error.message}`);
@@ -133,7 +219,7 @@ class TravelPayoutsService {
   }
 
   /**
-   * Format flight results for user display
+   * Format flight results for user display (LEGACY - for v2 cached API)
    * @param {Array} flights - Raw flight data from API
    * @param {Object} tripData - Original search parameters
    * @returns {Array} Formatted flight results
@@ -161,6 +247,52 @@ class TravelPayoutsService {
         transfers: flight.number_of_changes || 0,
         // DO NOT include direct affiliate link - use buildGoFlightsURL() instead
         rawData: flight
+      };
+    });
+  }
+
+  /**
+   * Format real-time API proposals for user display
+   * @param {Array} proposals - Proposals from real-time API
+   * @param {Object} tripData - Original search parameters
+   * @returns {Array} Formatted flight results
+   */
+  formatRealTimeResults(proposals, tripData) {
+    if (!proposals || proposals.length === 0) {
+      return [];
+    }
+
+    // Sort by total price
+    const sorted = proposals.sort((a, b) => {
+      const priceA = a.terms?.price?.total?.amount || 0;
+      const priceB = b.terms?.price?.total?.amount || 0;
+      return priceA - priceB;
+    });
+
+    return sorted.slice(0, 5).map((proposal, index) => {
+      const price = proposal.terms?.price?.total?.amount || 0;
+      const currency = proposal.terms?.price?.total?.currency || tripData.budget?.currency || 'USD';
+
+      // Extract airline from first segment
+      const firstSegment = proposal.segment?.[0];
+      const airline = firstSegment?.carrier?.marketing_carrier_name || 'Various';
+
+      // Count total stops/transfers
+      const totalStops = proposal.segment?.reduce((sum, seg) => {
+        return sum + (seg.stop?.length || 0);
+      }, 0) || 0;
+
+      return {
+        rank: index + 1,
+        price: `$${Math.round(price)} ${currency}`,
+        priceValue: price,
+        airline: airline,
+        departure: tripData.startDate,
+        returnDate: tripData.endDate,
+        duration: null, // Can be calculated from segments if needed
+        transfers: totalStops,
+        // DO NOT include direct affiliate link - use buildGoFlightsURL() instead
+        rawData: proposal
       };
     });
   }
