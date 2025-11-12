@@ -175,14 +175,12 @@ class TravelPayoutsService {
   extractCityCode(cityName) {
     // Common city mappings
     const cityMap = {
+      // North America
       'los angeles': 'LAX',
       'la': 'LAX',
       'new york': 'NYC',
       'nyc': 'NYC',
       'new york city': 'NYC',
-      'paris': 'PAR',
-      'london': 'LON',
-      'tokyo': 'TYO',
       'san francisco': 'SFO',
       'sf': 'SFO',
       'chicago': 'CHI',
@@ -194,13 +192,35 @@ class TravelPayoutsService {
       'toronto': 'YTO',
       'vancouver': 'YVR',
       'montreal': 'YUL',
+
+      // Europe
+      'paris': 'PAR',
+      'london': 'LON',
       'dublin': 'DUB',
       'barcelona': 'BCN',
       'rome': 'ROM',
       'amsterdam': 'AMS',
       'berlin': 'BER',
       'madrid': 'MAD',
-      'lisbon': 'LIS'
+      'lisbon': 'LIS',
+
+      // Asia
+      'tokyo': 'TYO',
+      'hong kong': 'HKG',
+      'hk': 'HKG',
+      'singapore': 'SIN',
+      'bangkok': 'BKK',
+      'seoul': 'SEL',
+      'shanghai': 'SHA',
+      'beijing': 'BJS',
+      'taipei': 'TPE',
+      'manila': 'MNL',
+      'kuala lumpur': 'KUL',
+      'jakarta': 'JKT',
+      'delhi': 'DEL',
+      'mumbai': 'BOM',
+      'dubai': 'DXB',
+      'doha': 'DOH'
     };
 
     const normalized = cityName.toLowerCase().trim();
@@ -392,11 +412,11 @@ class TravelPayoutsService {
     const originCode = this.extractCityCode(origin);
     const destCode = this.extractCityCode(destination);
 
-    // Format dates as DDMM (e.g., 1411 for Nov 14)
+    // Format dates as MMDD (e.g., 0912 for Sept 12)
     const formatDate = (dateStr) => {
       // Parse YYYY-MM-DD directly to avoid timezone issues
       const [year, month, day] = dateStr.split('-');
-      return `${day}${month}`;
+      return `${month}${day}`;
     };
 
     const departDate = formatDate(startDate);
@@ -404,8 +424,8 @@ class TravelPayoutsService {
 
     // Determine cabin class code (embedded in flightSearch string)
     // Based on actual URL format from book.otherwhere.world:
-    // - Economy simple: YVR1411NYC14012 (2 passengers total)
-    // - Business detailed: YVR1411NYC1401c121 (c + 1 adult + 2 children + 1 infant)
+    // - Economy simple: YVR0912YTO11122 (2 passengers total)
+    // - Business detailed: YVR0912YTO1112c121 (c + 1 adult + 2 children + 1 infant)
     const cabinMap = {
       'economy': '',      // no letter for economy
       'business': 'c',    // c for business
@@ -432,10 +452,10 @@ class TravelPayoutsService {
     }
 
     // Build flightSearch parameter
-    // Format: {origin}{DDMM}{dest}{DDMM}{passengers}
+    // Format: {origin}{MMDD}{dest}{MMDD}{passengers}
     // Examples:
-    //   YVR1411NYC14012 = YVR Nov-14 to NYC Jan-14, 2 passengers economy
-    //   YVR1411NYC1401c121 = YVR Nov-14 to NYC Jan-14, business, 1+2+1
+    //   YVR0912YTO11121 = YVR Sept-12 to YTO Nov-12, 1 passenger economy
+    //   YVR0912YTO1112c121 = YVR Sept-12 to YTO Nov-12, business, 1+2+1
     const flightSearch = `${originCode}${departDate}${destCode}${returnDate}${passengerString}`;
 
     const params = new URLSearchParams({
