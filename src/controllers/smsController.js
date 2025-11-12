@@ -194,9 +194,10 @@ class SMSController {
             }
           };
 
-          const bookingUrl = travelPayoutsService.buildGoFlightsURL(tripData, from);
+          // Get best booking URL (priority: proposal.link > white-label > /go/flights)
+          const bookingUrl = travelPayoutsService.getBestBookingURL(flightResults, tripData, from);
 
-          // Format flight message with whitelabel link
+          // Format flight message with booking link
           const topFlight = flightResults.flights[0];
           let flightMessage = `✈️ Found ${flightResults.flights.length} flight${flightResults.flights.length > 1 ? 's' : ''}!\n\n`;
 

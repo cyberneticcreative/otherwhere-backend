@@ -101,8 +101,8 @@ class TravelPayoutsService {
       const response = await axios.post(apiUrl, requestBody, {
         headers: {
           'x-affiliate-user-id': AVIASALES_TOKEN,
-          'x-real-host': AVIASALES_WL_HOST,
-          'x-user-ip': '127.0.0.1', // Default fallback, should be passed from request
+          'x-real-host': AVIASALES_WL_HOST, // White-label domain (book.otherwhere.world)
+          'x-user-ip': tripData.userIp || '127.0.0.1', // Use real user IP if available
           'x-signature': signature,
           'Content-Type': 'application/json'
         },
@@ -291,10 +291,50 @@ class TravelPayoutsService {
         returnDate: tripData.endDate,
         duration: null, // Can be calculated from segments if needed
         transfers: totalStops,
-        // DO NOT include direct affiliate link - use buildGoFlightsURL() instead
+        // Extract direct affiliate link from proposal (PRIORITY #1)
+        affiliateLink: proposal.link || null,
         rawData: proposal
       };
     });
+  }
+
+  /**
+   * Build white-label booking URL directly (PRIORITY #2)
+   * @param {Object} tripData - Trip search parameters
+   * @param {string} sessionId - Session ID for subid tracking
+   * @returns {string} White-label booking URL
+   */
+  buildWhiteLabelURL(tripData, sessionId = null) {
+    const { origin, destination, startDate, endDate, travelers } = tripData;
+
+    // Extract airport codes
+    const originCode = this.extractCityCode(origin);
+    const destCode = this.extractCityCode(destination);
+
+    // Format dates as MMDD (e.g., 1215 for Dec 15)
+    const formatDate = (dateStr) => {
+      const date = new Date(dateStr);
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      return `${month}${day}`;
+    };
+
+    const departDate = formatDate(startDate);
+    const returnDate = endDate ? formatDate(endDate) : '';
+
+    // Build flightSearch parameter: "YYZ1215CDG12191"
+    const flightSearch = `${originCode}${departDate}${destCode}${returnDate}${travelers || 1}`;
+
+    const params = new URLSearchParams({
+      flightSearch,
+      marker: AVIASALES_MARKER
+    });
+
+    if (sessionId) {
+      params.set('subid', `ow_${sessionId}`);
+    }
+
+    return `https://${AVIASALES_WL_HOST}/?${params.toString()}`;
   }
 
   /**
@@ -337,6 +377,33 @@ class TravelPayoutsService {
     base = base.replace(/\/webhook\/?$/, ''); // Remove /webhook or /webhook/ from end
 
     return `${base}/go/flights?${params.toString()}`;
+  }
+
+  /**
+   * Get best booking URL with priority logic
+   * Priority: proposal.link > white-label > /go/flights
+   *
+   * @param {Object} flightResults - Flight results with affiliateLink
+   * @param {Object} tripData - Original trip search data
+   * @param {string} sessionId - Session ID for tracking
+   * @returns {string} Best booking URL
+   */
+  getBestBookingURL(flightResults, tripData, sessionId = null) {
+    // PRIORITY #1: Use direct affiliate link from API response
+    if (flightResults.flights?.[0]?.affiliateLink) {
+      console.log('[TravelPayouts] 🔗 Using direct affiliate link from API');
+      return flightResults.flights[0].affiliateLink;
+    }
+
+    // PRIORITY #2: Use white-label URL
+    if (AVIASALES_WL_HOST && AVIASALES_MARKER) {
+      console.log('[TravelPayouts] 🏷️  Using white-label URL (book.otherwhere.world)');
+      return this.buildWhiteLabelURL(tripData, sessionId);
+    }
+
+    // PRIORITY #3: Fallback to /go/flights redirector
+    console.log('[TravelPayouts] ⚠️  Fallback to /go/flights redirector');
+    return this.buildGoFlightsURL(tripData, sessionId);
   }
 
   /**
