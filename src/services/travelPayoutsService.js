@@ -70,108 +70,79 @@ class TravelPayoutsService {
       console.log(`[Aviasales] 🔍 Searching flights: ${originCity} → ${destCity}`);
       console.log(`[Aviasales] 📅 Dates: ${departDate} to ${returnDate || 'one-way'}`);
       console.log(`[Aviasales] 👥 Travelers: ${travelers}`);
-
-      // === BUILD DIRECTIONS ARRAY (NEVER MUTATE AFTER THIS) ===
-      const directions = [
-        {
-          origin: originCity,
-          destination: destCity,
-          date: departDate
-        }
-      ];
-
-      // Add return leg if it's a round trip
-      if (returnDate) {
-        directions.push({
-          origin: destCity,
-          destination: originCity,
-          date: returnDate
-        });
-      }
-
-      // === VALIDATION: Ensure directions is valid ===
-      if (!Array.isArray(directions) || directions.length < 1) {
-        throw new Error('No valid directions built. Check your dates and destinations.');
-      }
-
-      // === BUILD REQUEST BODY ===
-      // Build passengers object first
-      const passengers = {
-        adults: parseInt(travelers) || 1,
-        children: 0,
-        infants: 0
-      };
-
-      // Build search_params object
-      const searchParams = {
-        trip_class: tripData.travelClass === 'business' ? 'C' : 'Y',
-        passengers: passengers
-      };
-
-      // Build final request body (directions MUST be top-level)
-      const requestBody = {
-        marker: AVIASALES_MARKER,
-        market_code: 'us',
-        locale: 'en',
-        currency_code: budget?.currency || 'USD',
-        search_params: searchParams,
-        directions: directions  // Explicitly named field
-      };
-
-      // === LOG PAYLOAD FOR DEBUGGING ===
-      console.log(`[Aviasales] 🔍 Directions array:`, JSON.stringify(directions, null, 2));
-      console.log(`[Aviasales] 👥 Passengers:`, JSON.stringify(passengers, null, 2));
-      console.log(`[Aviasales] 📦 Full request payload:`, JSON.stringify(requestBody, null, 2));
-
-      // Validate before sending
-      if (!requestBody.directions || requestBody.directions.length === 0) {
-        throw new Error('FATAL: directions array is empty in final payload');
-      }
-
-      // Use Data API (publicly available, no special access needed)
-      // Real-time Search API requires approval - using prices_for_dates instead
-      const apiUrl = 'https://api.travelpayouts.com/aviasales/v3/prices_for_dates';
-
-      const params = {
-        origin: originCity,
-        destination: destCity,
-        departure_at: departDate,
-        return_at: returnDate || undefined,
-        currency: budget?.currency || 'USD',
-        token: AVIASALES_TOKEN,
-        sorting: 'price', // Sort by cheapest first
-        limit: 30 // Get more results
-      };
-
       console.log(`[Aviasales] 🔑 Using token:`, AVIASALES_TOKEN?.substring(0, 8) + '...');
       console.log(`[Aviasales] 🏷️  Using marker:`, AVIASALES_MARKER);
       console.log(`[Aviasales] 🌐 WL Host:`, AVIASALES_WL_HOST);
-      console.log(`[Aviasales] 🚀 Using Data API (prices_for_dates)...`);
-      console.log(`[Aviasales] 📦 Request params:`, JSON.stringify(params, null, 2));
 
-      const response = await axios.get(apiUrl, {
-        params,
-        timeout: 15000
-      });
+      let flightData = [];
 
-      // Log full response for debugging
-      console.log(`[Aviasales] 📥 Raw API response:`, JSON.stringify(response.data).substring(0, 500));
+      // === STRATEGY 1: Try v3 prices_for_dates (best for near-term) ===
+      try {
+        console.log(`[Aviasales] 🚀 Strategy 1: Trying v3/prices_for_dates...`);
+        const v3Url = 'https://api.travelpayouts.com/aviasales/v3/prices_for_dates';
+        const v3Params = {
+          origin: originCity,
+          destination: destCity,
+          departure_at: departDate,
+          return_at: returnDate || undefined,
+          currency: budget?.currency || 'USD',
+          token: AVIASALES_TOKEN,
+          sorting: 'price',
+          limit: 30
+        };
 
-      // Data API returns results directly (no polling needed)
-      if (!response.data?.success) {
-        console.log(`[Aviasales] ❌ API error:`, response.data);
-        throw new Error('API returned success: false');
+        const v3Response = await axios.get(v3Url, {
+          params: v3Params,
+          timeout: 10000
+        });
+
+        if (v3Response.data?.success && v3Response.data?.data?.length > 0) {
+          flightData = v3Response.data.data;
+          console.log(`[Aviasales] ✅ v3 found ${flightData.length} flights`);
+        } else {
+          console.log(`[Aviasales] ⚠️  v3 returned 0 results, trying fallback...`);
+        }
+      } catch (v3Error) {
+        console.log(`[Aviasales] ⚠️  v3 error:`, v3Error.message);
       }
 
-      const flightData = response.data.data || [];
-      console.log(`[Aviasales] ✅ Found ${flightData.length} flight options`);
-
+      // === STRATEGY 2: Fallback to v1 prices/cheap (works for far future) ===
       if (flightData.length === 0) {
-        console.log(`[Aviasales] ⚠️  0 results - dates may be too far in future or no flights on this route`);
+        try {
+          console.log(`[Aviasales] 🚀 Strategy 2: Trying v1/prices/cheap...`);
+          const v1Url = 'https://api.travelpayouts.com/v1/prices/cheap';
+          const v1Params = {
+            origin: originCity,
+            destination: destCity,
+            currency: budget?.currency || 'USD',
+            token: AVIASALES_TOKEN
+          };
+
+          const v1Response = await axios.get(v1Url, {
+            params: v1Params,
+            timeout: 10000
+          });
+
+          if (v1Response.data?.success && v1Response.data?.data?.[destCity]) {
+            // v1 returns data grouped by destination
+            const destData = v1Response.data.data[destCity];
+            // Convert to array and take cheapest options
+            flightData = Object.values(destData).slice(0, 5);
+            console.log(`[Aviasales] ✅ v1 found ${flightData.length} price options`);
+          } else {
+            console.log(`[Aviasales] ⚠️  v1 returned no data`);
+          }
+        } catch (v1Error) {
+          console.log(`[Aviasales] ⚠️  v1 error:`, v1Error.message);
+        }
       }
 
-      // Format the results using Data API format
-      const flights = this.formatDataAPIResults(flightData, tripData);
+      // === STRATEGY 3: Always return white-label link even with no API data ===
+      const flights = flightData.length > 0
+        ? this.formatDataAPIResults(flightData, tripData)
+        : this.generateFallbackFlights(originCity, destCity, departDate, returnDate);
+
+      console.log(`[Aviasales] 🎯 Final result: ${flights.length} flight options`);
 
       return {
         success: true,
@@ -274,6 +245,35 @@ class TravelPayoutsService {
         rawData: flight
       };
     });
+  }
+
+  /**
+   * Generate fallback flight entries when API returns no data
+   * Like Kayak fallback - always provide a booking link
+   * @param {string} origin - Origin airport code
+   * @param {string} destination - Destination airport code
+   * @param {string} departDate - Departure date
+   * @param {string} returnDate - Return date (optional)
+   * @returns {Array} Fallback flight entries
+   */
+  generateFallbackFlights(origin, destination, departDate, returnDate) {
+    console.log(`[Aviasales] 🎯 Generating fallback flight entry (no API prices available)`);
+
+    // Return a single generic flight entry
+    // The white-label link will still work for booking
+    return [{
+      rank: 1,
+      price: 'Search flights',
+      priceValue: 0,
+      airline: 'Multiple Airlines',
+      departure: departDate,
+      returnDate: returnDate,
+      duration: null,
+      transfers: null,
+      // No affiliateLink - will use white-label URL in getBestBookingURL()
+      affiliateLink: null,
+      rawData: null
+    }];
   }
 
   /**
