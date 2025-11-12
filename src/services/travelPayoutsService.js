@@ -382,18 +382,17 @@ class TravelPayoutsService {
     const startDate = tripData.startDate || tripData.check_in || tripData.depart_date;
     const endDate = tripData.endDate || tripData.check_out || tripData.return_date;
 
-    // Calculate total travelers (adults + children + infants)
-    let travelers = tripData.travelers || 1;
-    if (tripData.adults || tripData.children || tripData.infants) {
-      travelers = (tripData.adults || 0) + (tripData.children || 0) + (tripData.infants || 0);
-    }
+    // Extract passenger details
+    const adults = tripData.adults || tripData.travelers || 1;
+    const children = tripData.children || 0;
+    const infants = tripData.infants || 0;
+    const totalTravelers = adults + children + infants;
 
     // Extract airport codes
     const originCode = this.extractCityCode(origin);
     const destCode = this.extractCityCode(destination);
 
     // Format dates as DDMM (e.g., 1411 for Nov 14)
-    // Example: YVR1411NYC16121 = YVR Nov-14 to NYC Dec-16, 1 traveler
     const formatDate = (dateStr) => {
       // Parse YYYY-MM-DD directly to avoid timezone issues
       const [year, month, day] = dateStr.split('-');
@@ -403,8 +402,41 @@ class TravelPayoutsService {
     const departDate = formatDate(startDate);
     const returnDate = endDate ? formatDate(endDate) : '';
 
-    // Build flightSearch parameter: "YVR1411NYC16121" (origin + DDMM + dest + DDMM + travelers)
-    const flightSearch = `${originCode}${departDate}${destCode}${returnDate}${travelers || 1}`;
+    // Determine cabin class code (embedded in flightSearch string)
+    // Based on actual URL format from book.otherwhere.world:
+    // - Economy simple: YVR1411NYC14012 (2 passengers total)
+    // - Business detailed: YVR1411NYC1401c121 (c + 1 adult + 2 children + 1 infant)
+    const cabinMap = {
+      'economy': '',      // no letter for economy
+      'business': 'c',    // c for business
+      'first': 'f',       // f for first
+      'premium economy': 'w'  // w for premium economy
+    };
+    const travelClass = (tripData.travelClass || 'economy').toLowerCase();
+    const cabinCode = cabinMap[travelClass] || '';
+
+    // Build passenger string
+    // - Economy with no breakdown: just total number (e.g., "2")
+    // - Business/First OR has breakdown: cabin + adults + children + infants (e.g., "c121")
+    let passengerString;
+    const needsBreakdown = children > 0 || infants > 0 || cabinCode !== '';
+
+    if (needsBreakdown) {
+      // Detailed format: {cabin}{adults}{children}{infants}
+      // Example: c121 = business, 1 adult, 2 children, 1 infant
+      passengerString = `${cabinCode}${adults}${children}${infants}`;
+    } else {
+      // Simple format: just total count
+      // Example: 2 = 2 passengers (economy assumed)
+      passengerString = `${totalTravelers}`;
+    }
+
+    // Build flightSearch parameter
+    // Format: {origin}{DDMM}{dest}{DDMM}{passengers}
+    // Examples:
+    //   YVR1411NYC14012 = YVR Nov-14 to NYC Jan-14, 2 passengers economy
+    //   YVR1411NYC1401c121 = YVR Nov-14 to NYC Jan-14, business, 1+2+1
+    const flightSearch = `${originCode}${departDate}${destCode}${returnDate}${passengerString}`;
 
     const params = new URLSearchParams({
       flightSearch,
@@ -413,20 +445,6 @@ class TravelPayoutsService {
 
     if (sessionId) {
       params.set('subid', `ow_${sessionId}`);
-    }
-
-    // Add cabin class if specified (economy, business, first)
-    // TravelPayouts widget may support 'cabin_class' parameter
-    if (tripData.travelClass) {
-      // Map to TravelPayouts format
-      const cabinMap = {
-        'economy': 'Y',
-        'business': 'C',
-        'first': 'F',
-        'premium economy': 'W'
-      };
-      const cabin = cabinMap[tripData.travelClass.toLowerCase()] || 'Y';
-      params.set('cabin_class', cabin);
     }
 
     return `https://${AVIASALES_WL_HOST}/?${params.toString()}`;
