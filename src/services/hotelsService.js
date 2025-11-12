@@ -113,18 +113,16 @@ class HotelsService {
           timeout: 15000
         });
 
-        // Log raw response for debugging
-        console.log(`[Hotels.com] Raw API response type:`, typeof response.data);
-        console.log(`[Hotels.com] Raw API response keys:`, response.data ? Object.keys(response.data).join(', ') : 'null');
-        console.log(`[Hotels.com] Raw API response sample:`, JSON.stringify(response.data).substring(0, 300));
+        // Extract search results from response
+        // API structure: { data: { sr: [...] }, status: true, message: "..." }
+        const rawResults = response.data?.data?.sr || response.data?.sr || [];
 
-        const rawResults = response.data?.data || response.data || [];
-
-        // Check if rawResults is actually an array
+        // Validate we got an array
         if (!Array.isArray(rawResults)) {
-          console.log(`[Hotels.com] ❌ rawResults is not an array, it's a ${typeof rawResults}`);
-          console.log(`[Hotels.com] rawResults content:`, JSON.stringify(rawResults).substring(0, 500));
-          throw new Error(`API returned non-array response: ${typeof rawResults}`);
+          console.log(`[Hotels.com] ❌ Unexpected response format`);
+          console.log(`[Hotels.com] Response keys:`, response.data ? Object.keys(response.data).join(', ') : 'null');
+          console.log(`[Hotels.com] Response sample:`, JSON.stringify(response.data).substring(0, 300));
+          throw new Error(`API returned unexpected format: expected array in data.sr`);
         }
 
         console.log(`[Hotels.com] Found ${rawResults.length} locations for "${query}"`);
