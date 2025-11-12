@@ -113,7 +113,19 @@ class HotelsService {
           timeout: 15000
         });
 
+        // Log raw response for debugging
+        console.log(`[Hotels.com] Raw API response type:`, typeof response.data);
+        console.log(`[Hotels.com] Raw API response keys:`, response.data ? Object.keys(response.data).join(', ') : 'null');
+        console.log(`[Hotels.com] Raw API response sample:`, JSON.stringify(response.data).substring(0, 300));
+
         const rawResults = response.data?.data || response.data || [];
+
+        // Check if rawResults is actually an array
+        if (!Array.isArray(rawResults)) {
+          console.log(`[Hotels.com] ❌ rawResults is not an array, it's a ${typeof rawResults}`);
+          console.log(`[Hotels.com] rawResults content:`, JSON.stringify(rawResults).substring(0, 500));
+          throw new Error(`API returned non-array response: ${typeof rawResults}`);
+        }
 
         console.log(`[Hotels.com] Found ${rawResults.length} locations for "${query}"`);
 
