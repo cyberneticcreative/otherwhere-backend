@@ -1,6 +1,5 @@
 const OpenAI = require('openai');
-const duffelFlightsService = require('./duffelFlightsService');
-const airlineDeepLinksService = require('./airlineDeepLinksService');
+const travelPayoutsService = require('./travelPayoutsService');
 const airportResolverService = require('./airportResolverService');
 const airbnbService = require('./airbnbService');
 const hotelsService = require('./hotelsService');
@@ -217,92 +216,73 @@ class AssistantService {
                 } : null
               };
 
-              // SEARCH FLIGHTS using Duffel API and create airline deeplinks
+              // SEARCH FLIGHTS using Aviasales/TravelPayouts API
               try {
                 const flightSearchStart = Date.now();
-                console.log('🛫 Searching flights via Duffel API...');
+                console.log('🛫 Searching flights via Aviasales/TravelPayouts API...');
 
                 // Resolve city names to IATA airport codes
                 let originCode, destCode;
                 try {
-                  originCode = airportResolverService.resolveAirportCode(tripSearchData.origin);
-                  destCode = airportResolverService.resolveAirportCode(tripSearchData.destination);
-                  console.log(`[AirportResolver] ${tripSearchData.origin} → ${originCode}, ${tripSearchData.destination} → ${destCode}`);
+                  originCode = travelPayoutsService.extractCityCode(tripSearchData.origin);
+                  destCode = travelPayoutsService.extractCityCode(tripSearchData.destination);
+                  console.log(`[TravelPayouts] ${tripSearchData.origin} → ${originCode}, ${tripSearchData.destination} → ${destCode}`);
                 } catch (resolveError) {
                   throw new Error(`${resolveError.message} Please specify a major city or 3-letter airport code.`);
                 }
 
-                // Search flights using Duffel
-                const searchResults = await duffelFlightsService.searchFlights({
+                // Search flights using Aviasales/TravelPayouts
+                const searchResults = await travelPayoutsService.searchFlights({
                   origin: originCode,
                   destination: destCode,
-                  departureDate: tripSearchData.startDate,
-                  returnDate: tripSearchData.endDate,
-                  passengers: parseInt(tripSearchData.travelers) || 1,
-                  cabin: cabinClass
+                  startDate: tripSearchData.startDate,
+                  endDate: tripSearchData.endDate,
+                  travelers: parseInt(tripSearchData.travelers) || 1,
+                  travelClass: cabinClass,
+                  budget: tripSearchData.budget
                 });
 
                 console.log(`✈️  Searching ${cabinClass} class flights`);
 
-                if (!searchResults.success || searchResults.offers.length === 0) {
+                if (!searchResults.success || searchResults.flights.length === 0) {
                   throw new Error('No flights found for your search');
                 }
 
-                // Format top 3 offers
-                const formattedFlights = duffelFlightsService.formatOffers(searchResults.offers, 3);
-
-                // Build airline deeplinks for each flight
-                const flightsWithLinks = formattedFlights.map(flight => {
-                  const bookingData = airlineDeepLinksService.buildBookingURL({
-                    airlineCode: flight.airline.iata_code,
-                    origin: originCode,
-                    destination: destCode,
-                    departure: tripSearchData.startDate,
-                    return: tripSearchData.endDate,
-                    passengers: parseInt(tripSearchData.travelers) || 1,
-                    cabin: cabinClass
-                  });
-
-                  return {
-                    ...flight,
-                    bookingUrl: bookingData.url,
-                    bookingSource: bookingData.source
-                  };
-                });
-
-                // Store flight results for SMS handler
+                // Store flight results for SMS handler (will use whitelabel booking link)
                 flightResults = {
-                  flights: flightsWithLinks,
+                  flights: searchResults.flights,
                   originCode: originCode,
                   destCode: destCode,
                   searchParams: {
                     outboundDate: tripSearchData.startDate,
                     returnDate: tripSearchData.endDate,
                     passengers: parseInt(tripSearchData.travelers) || 1,
-                    cabinClass: cabinClass
+                    cabinClass: cabinClass,
+                    currency: tripSearchData.budget?.currency || 'USD'
                   }
                 };
 
                 // Format message for assistant
-                const bestFlight = flightsWithLinks[0];
-                const resultsMessage = `${dateWarning}Perfect! I found ${flightsWithLinks.length} flights from ${tripSearchData.origin} to ${tripSearchData.destination}. Best option: ${bestFlight.airline.name} for $${Math.round(bestFlight.price)} (${bestFlight.duration.text}, ${bestFlight.stops === 0 ? 'Direct' : `${bestFlight.stops} stop${bestFlight.stops > 1 ? 's' : ''}`}). Check your texts for all options with direct booking links!`;
+                const bestFlight = searchResults.flights[0];
+                const stops = bestFlight.transfers || 0;
+                const resultsMessage = `${dateWarning}Perfect! I found ${searchResults.flights.length} flights from ${tripSearchData.origin} to ${tripSearchData.destination}. Best option: ${bestFlight.airline || 'Various airlines'} for $${Math.round(bestFlight.priceValue)} ${stops === 0 ? '(Direct)' : `(${stops} stop${stops > 1 ? 's' : ''})`}. Check your texts for all options with booking link!`;
 
                 toolOutputs.push({
                   tool_call_id: toolCall.id,
                   output: JSON.stringify({
                     success: true,
                     message: resultsMessage,
-                    flightCount: flightsWithLinks.length,
-                    bestPrice: Math.round(bestFlight.price),
-                    airline: bestFlight.airline.name
+                    flightCount: searchResults.flights.length,
+                    bestPrice: Math.round(bestFlight.priceValue),
+                    airline: bestFlight.airline || 'Various'
                   })
                 });
 
                 const flightSearchDuration = Date.now() - flightSearchStart;
-                console.log(`✅ Found ${flightsWithLinks.length} flights with airline deeplinks in ${flightSearchDuration}ms`);
+                console.log(`✅ Found ${searchResults.flights.length} flights via Aviasales in ${flightSearchDuration}ms`);
 
               } catch (error) {
-                console.error('❌ Duffel flight search error:', error.message);
+                console.error('❌ Aviasales flight search error:', error.message);
 
                 // Return error to assistant
                 toolOutputs.push({
