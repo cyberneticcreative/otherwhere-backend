@@ -154,6 +154,9 @@ class TravelPayoutsService {
         timeout: 15000
       });
 
+      // Log full response for debugging
+      console.log(`[Aviasales] 📥 Raw API response:`, JSON.stringify(response.data).substring(0, 500));
+
       // Data API returns results directly (no polling needed)
       if (!response.data?.success) {
         console.log(`[Aviasales] ❌ API error:`, response.data);
@@ -162,6 +165,10 @@ class TravelPayoutsService {
 
       const flightData = response.data.data || [];
       console.log(`[Aviasales] ✅ Found ${flightData.length} flight options`);
+
+      if (flightData.length === 0) {
+        console.log(`[Aviasales] ⚠️  0 results - dates may be too far in future or no flights on this route`);
+      }
 
       // Format the results using Data API format
       const flights = this.formatDataAPIResults(flightData, tripData);
