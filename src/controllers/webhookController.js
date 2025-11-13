@@ -228,8 +228,9 @@ class WebhookController {
           } : null
         };
 
-        // Get user phone number from metadata
-        const phoneNumber = metadata?.phone_number || metadata?.from;
+        // Get user phone number from parameters first (ElevenLabs sends it here), then metadata
+        const phoneNumber = parameters.phone_number || metadata?.phone_number || metadata?.from;
+        console.log(`📱 Phone number for SMS: ${phoneNumber || 'NOT PROVIDED'}`);
 
         try {
           // Search flights using TravelPayouts/Aviasales (same as SMS flow)

@@ -175,14 +175,87 @@ class TravelPayoutsService {
   }
 
   /**
-   * Extract IATA city code from city name
+   * Extract IATA city/metro code for Aviasales white-label URLs
+   * Note: Aviasales uses metro codes (YTO, NYC, LON) not airport codes (YYZ, JFK, LHR)
    * @param {string} cityName - City name or code
-   * @returns {string} IATA code
-   * @deprecated Use airportResolverService.resolveAirportCode() instead
+   * @returns {string} Metro/city code for Aviasales
    */
   extractCityCode(cityName) {
-    // Use the centralized airport resolver service
-    return airportResolverService.resolveAirportCode(cityName);
+    // Aviasales white-label uses metro/city codes, not airport codes
+    // Map major cities to their metro codes
+    const cityToMetroCode = {
+      // North America
+      'toronto': 'YTO',    // Not YYZ
+      'new york': 'NYC',   // Not JFK/EWR/LGA
+      'los angeles': 'LAX',
+      'chicago': 'CHI',    // Not ORD
+      'san francisco': 'SFO',
+      'miami': 'MIA',
+      'boston': 'BOS',
+      'seattle': 'SEA',
+      'las vegas': 'LAS',
+      'orlando': 'MCO',
+      'austin': 'AUS',
+      'denver': 'DEN',
+      'philadelphia': 'PHL',
+      'washington': 'WAS',  // Not IAD/DCA
+      'dallas': 'DFW',
+      'houston': 'HOU',     // Not IAH
+      'phoenix': 'PHX',
+      'san diego': 'SAN',
+      'vancouver': 'YVR',
+      'montreal': 'YMQ',    // Not YUL
+      'calgary': 'YYC',
+
+      // Europe
+      'london': 'LON',      // Not LHR/LGW
+      'paris': 'PAR',       // Not CDG
+      'rome': 'ROM',        // Not FCO
+      'barcelona': 'BCN',
+      'madrid': 'MAD',
+      'amsterdam': 'AMS',
+      'berlin': 'BER',
+      'dublin': 'DUB',
+      'lisbon': 'LIS',
+      'milan': 'MIL',       // Not MXP
+      'venice': 'VCE',
+
+      // Asia
+      'tokyo': 'TYO',       // Not NRT/HND
+      'bangkok': 'BKK',
+      'singapore': 'SIN',
+      'hong kong': 'HKG',
+      'seoul': 'SEL',       // Not ICN
+      'taipei': 'TPE',
+      'shanghai': 'SHA',    // Not PVG
+      'beijing': 'BJS',     // Not PEK
+      'dubai': 'DXB',
+      'manila': 'MNL',
+      'jakarta': 'JKT',     // Not CGK
+      'delhi': 'DEL',
+      'mumbai': 'BOM'
+    };
+
+    const normalized = cityName.toLowerCase().trim();
+
+    // Check if it's already a 3-letter code
+    if (/^[A-Z]{3}$/i.test(cityName)) {
+      return cityName.toUpperCase();
+    }
+
+    // Look up metro code
+    const metroCode = cityToMetroCode[normalized];
+    if (metroCode) {
+      return metroCode;
+    }
+
+    // Fallback to airport resolver if not in our metro mapping
+    try {
+      return airportResolverService.resolveAirportCode(cityName);
+    } catch (error) {
+      // Last resort: return uppercase version
+      return cityName.toUpperCase().substring(0, 3);
+    }
   }
 
   /**
