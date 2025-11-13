@@ -264,8 +264,12 @@ class AssistantService {
 
                 // Format message for assistant
                 const bestFlight = searchResults.flights[0];
-                const stops = bestFlight.transfers || 0;
-                const resultsMessage = `${dateWarning}Perfect! I found ${searchResults.flights.length} flights from ${tripSearchData.origin} to ${tripSearchData.destination}. Best option: ${bestFlight.airline || 'Various airlines'} for $${Math.round(bestFlight.priceValue)} ${stops === 0 ? '(Direct)' : `(${stops} stop${stops > 1 ? 's' : ''})`}. Check your texts for all options with booking link!`;
+                const stops = bestFlight.transfers;
+                // Only show stops info if we have reliable data (not null/undefined)
+                const stopsInfo = stops !== null && stops !== undefined
+                  ? ` ${stops === 0 ? '(Direct)' : `(${stops} stop${stops > 1 ? 's' : ''})`}`
+                  : '';
+                const resultsMessage = `${dateWarning}Perfect! I found ${searchResults.flights.length} flights from ${tripSearchData.origin} to ${tripSearchData.destination}. Best option: ${bestFlight.airline || 'Various airlines'} for $${Math.round(bestFlight.priceValue)}${stopsInfo}. Check your texts for all options with booking link!`;
 
                 toolOutputs.push({
                   tool_call_id: toolCall.id,

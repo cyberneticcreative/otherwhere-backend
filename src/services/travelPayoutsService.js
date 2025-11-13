@@ -1,5 +1,6 @@
 const axios = require('axios');
 const crypto = require('crypto');
+const airportResolverService = require('./airportResolverService');
 
 // Support both old and new env variable names
 const AVIASALES_TOKEN = process.env.AVIASALES_TOKEN || process.env.TRAVELPAYOUTS_TOKEN;
@@ -63,9 +64,9 @@ class TravelPayoutsService {
         throw new Error('Missing departure date. Please specify dates like "Dec 15-19"');
       }
 
-      // Parse destination and origin codes
-      const originCity = this.extractCityCode(origin);
-      const destCity = this.extractCityCode(destination);
+      // Parse destination and origin codes using airportResolverService
+      const originCity = airportResolverService.resolveAirportCode(origin);
+      const destCity = airportResolverService.resolveAirportCode(destination);
 
       console.log(`[Aviasales] 🔍 Searching flights: ${originCity} → ${destCity}`);
       console.log(`[Aviasales] 📅 Dates: ${departDate} to ${returnDate || 'one-way'}`);
@@ -171,67 +172,11 @@ class TravelPayoutsService {
    * Extract IATA city code from city name
    * @param {string} cityName - City name or code
    * @returns {string} IATA code
+   * @deprecated Use airportResolverService.resolveAirportCode() instead
    */
   extractCityCode(cityName) {
-    // Common city mappings
-    const cityMap = {
-      // North America
-      'los angeles': 'LAX',
-      'la': 'LAX',
-      'new york': 'NYC',
-      'nyc': 'NYC',
-      'new york city': 'NYC',
-      'san francisco': 'SFO',
-      'sf': 'SFO',
-      'chicago': 'CHI',
-      'miami': 'MIA',
-      'boston': 'BOS',
-      'seattle': 'SEA',
-      'las vegas': 'LAS',
-      'orlando': 'ORL',
-      'toronto': 'YTO',
-      'vancouver': 'YVR',
-      'montreal': 'YUL',
-
-      // Europe
-      'paris': 'PAR',
-      'london': 'LON',
-      'dublin': 'DUB',
-      'barcelona': 'BCN',
-      'rome': 'ROM',
-      'amsterdam': 'AMS',
-      'berlin': 'BER',
-      'madrid': 'MAD',
-      'lisbon': 'LIS',
-
-      // Asia
-      'tokyo': 'TYO',
-      'hong kong': 'HKG',
-      'hk': 'HKG',
-      'singapore': 'SIN',
-      'bangkok': 'BKK',
-      'seoul': 'SEL',
-      'shanghai': 'SHA',
-      'beijing': 'BJS',
-      'taipei': 'TPE',
-      'manila': 'MNL',
-      'kuala lumpur': 'KUL',
-      'jakarta': 'JKT',
-      'delhi': 'DEL',
-      'mumbai': 'BOM',
-      'dubai': 'DXB',
-      'doha': 'DOH'
-    };
-
-    const normalized = cityName.toLowerCase().trim();
-
-    // Check if it's already a code (3 letters)
-    if (/^[A-Z]{3}$/i.test(cityName)) {
-      return cityName.toUpperCase();
-    }
-
-    // Look up in map
-    return cityMap[normalized] || 'LAX'; // Default to LAX if not found
+    // Use the centralized airport resolver service
+    return airportResolverService.resolveAirportCode(cityName);
   }
 
   /**
@@ -320,7 +265,9 @@ class TravelPayoutsService {
 
       // Data API format: transfers, airline
       const airline = flight.airline || 'Various';
-      const transfers = flight.transfers || 0;
+      // Only set transfers if explicitly provided in API response
+      // Don't default to 0 as it makes everything appear as "Direct"
+      const transfers = flight.transfers !== undefined ? flight.transfers : null;
 
       return {
         rank: index + 1,
@@ -459,8 +406,8 @@ class TravelPayoutsService {
     const flightSearch = `${originCode}${departDate}${destCode}${returnDate}${passengerString}`;
 
     const params = new URLSearchParams({
-      flightSearch,
-      marker: AVIASALES_MARKER
+      flightSearch
+      // Note: marker param removed - subdomain ownership provides automatic attribution
     });
 
     if (sessionId) {

@@ -207,13 +207,10 @@ class SMSController {
             const price = `$${Math.round(priceValue)}`;
 
             flightMessage += `${idx + 1}. ${price}`;
-
-            // Add stops if available
-            const stops = flight.transfers || flight.stops || 0;
-            if (stops > 0) {
-              flightMessage += ` (${stops} stop${stops > 1 ? 's' : ''})`;
-            } else {
-              flightMessage += ` (Direct)`;
+            // Only show stops if we have reliable data (not null/undefined)
+            const stops = flight.stops !== undefined ? flight.stops : flight.transfers;
+            if (stops !== null && stops !== undefined) {
+              flightMessage += stops === 0 ? ' (Direct)' : ` (${stops} stop${stops > 1 ? 's' : ''})`;
             }
 
             // Add airline if available

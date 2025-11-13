@@ -124,12 +124,18 @@ class AirportResolverService {
 
     let normalized = location.toLowerCase().trim();
 
-    // Smart preprocessing: Remove " city" suffix if present
+    // Smart preprocessing: Remove common suffixes
     // "New York City" → "new york"
     // "San Francisco City" → "san francisco"
-    if (normalized.endsWith(' city')) {
-      normalized = normalized.slice(0, -5).trim();
-      console.log(`[AirportResolver] Removed " city" suffix: "${location}" → "${normalized}"`);
+    // "London UK" → "london"
+    // "Tokyo Japan" → "tokyo"
+    const suffixesToRemove = [' city', ' uk', ' usa', ' us', ' japan', ' china', ' canada'];
+    for (const suffix of suffixesToRemove) {
+      if (normalized.endsWith(suffix)) {
+        normalized = normalized.slice(0, -suffix.length).trim();
+        console.log(`[AirportResolver] Removed "${suffix}" suffix: "${location}" → "${normalized}"`);
+        break; // Only remove one suffix
+      }
     }
 
     // FIRST: Check if it's in our commonAirports mapping (handles city names AND city codes like "NYC")

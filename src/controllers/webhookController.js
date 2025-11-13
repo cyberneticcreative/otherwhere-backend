@@ -1,6 +1,7 @@
 const twilioService = require('../services/twilioService');
 const sessionManager = require('../services/sessionManager');
 const elevenLabsService = require('../services/elevenLabsService');
+const travelPayoutsService = require('../services/travelPayoutsService');
 const duffelFlightsService = require('../services/duffelFlightsService');
 const airlineDeepLinksService = require('../services/airlineDeepLinksService');
 const airportResolverService = require('../services/airportResolverService');
@@ -192,73 +193,74 @@ class WebhookController {
         const phoneNumber = metadata?.phone_number || metadata?.from;
 
         try {
-          // Search flights using Duffel API with airline deeplinks
-          console.log(`[DuffelFlights] Searching flights: ${origin} → ${destination} on ${correctedCheckIn}`);
+          // Search flights using TravelPayouts/Aviasales (same as SMS flow)
+          console.log(`[Aviasales] Searching flights: ${origin} → ${destination} on ${correctedCheckIn}`);
 
-          // Resolve city names to IATA airport codes
-          let originCode, destCode;
-          try {
-            originCode = airportResolverService.resolveAirportCode(origin);
-            destCode = airportResolverService.resolveAirportCode(destination);
-            console.log(`[AirportResolver] ${origin} → ${originCode}, ${destination} → ${destCode}`);
-          } catch (resolveError) {
-            throw new Error(`${resolveError.message} Please specify a major city or 3-letter airport code.`);
-          }
+          // Build trip data for TravelPayouts search
+          const tripData = {
+            origin: origin,
+            destination: destination,
+            startDate: correctedCheckIn,
+            endDate: correctedCheckOut,
+            travelers: parseInt(travelers) || 1,
+            budget: budget_usd ? {
+              amount: budget_usd,
+              currency: 'USD'
+            } : { currency: 'USD' }
+          };
 
-          // Search flights using Duffel
-          const searchResults = await duffelFlightsService.searchFlights({
-            origin: originCode,
-            destination: destCode,
-            departureDate: correctedCheckIn,
-            returnDate: correctedCheckOut,
-            passengers: parseInt(travelers) || 1,
-            cabin: 'economy'
-          });
+          // Search flights using TravelPayouts (same as SMS)
+          const searchResults = await travelPayoutsService.searchFlights(tripData);
 
-          if (!searchResults.success || searchResults.offers.length === 0) {
+          if (!searchResults.success || searchResults.flights.length === 0) {
             throw new Error('No flights found for your search');
           }
 
-          // Format top 3 offers
-          const formattedFlights = duffelFlightsService.formatOffers(searchResults.offers, 3);
+          // Get airport codes from results
+          const originCode = searchResults.searchParams.origin;
+          const destCode = searchResults.searchParams.destination;
 
-          // Build airline deeplinks for each flight
-          const flightsWithLinks = formattedFlights.map(flight => {
-            const bookingData = airlineDeepLinksService.buildBookingURL({
-              airlineCode: flight.airline.iata_code,
-              origin: originCode,
-              destination: destCode,
-              departure: correctedCheckIn,
-              return: correctedCheckOut,
-              passengers: parseInt(travelers) || 1,
-              cabin: 'economy'
-            });
+          // Build white-label booking URL (same as SMS)
+          const bookingUrl = travelPayoutsService.getBestBookingURL(
+            searchResults,
+            tripData,
+            phoneNumber
+          );
 
-            return {
-              ...flight,
-              bookingUrl: bookingData.url,
-              bookingSource: bookingData.source
-            };
+          // Format SMS message with flight options and white-label booking link
+          let smsMessage = `✈️ Found ${searchResults.flights.length} flight${searchResults.flights.length > 1 ? 's' : ''}!\n\n`;
+
+          // Show top 3 flights
+          searchResults.flights.slice(0, 3).forEach((flight, idx) => {
+            const price = flight.price || `$${flight.priceValue || 'N/A'}`;
+            smsMessage += `${idx + 1}. ${price}`;
+            // Only show stops if we have reliable data (not null/undefined)
+            const stops = flight.transfers;
+            if (stops !== null && stops !== undefined) {
+              smsMessage += stops === 0 ? ' (Direct)' : ` (${stops} stop${stops > 1 ? 's' : ''})`;
+            }
+            if (flight.airline) {
+              smsMessage += ` - ${flight.airline}`;
+            }
+            smsMessage += `\n`;
           });
 
-          // Format SMS message with flight options and airline deeplinks
-          const smsMessage = await airlineDeepLinksService.formatSMSWithLinks(
-            flightsWithLinks,
-            {
-              origin: originCode,
-              destination: destCode,
-              departure: correctedCheckIn,
-              returnDate: correctedCheckOut,
-              passengers: parseInt(travelers) || 1,
-              cabin: 'economy'
-            }
-          );
+          smsMessage += `\n🔗 Book now: ${bookingUrl}`;
+
+          // Get flights for response (use searchResults.flights)
+          const flightsWithLinks = searchResults.flights.slice(0, 3).map(flight => ({
+            ...flight,
+            bookingUrl: bookingUrl,
+            bookingSource: 'white-label',
+            airline: { name: flight.airline || 'Various' },
+            price: flight.priceValue
+          }));
 
           // Save to session for tracking
           if (phoneNumber) {
             await sessionManager.updateSession(phoneNumber, {
               tripDetails,
-              lastFlightResults: flightsWithLinks,
+              lastFlightResults: searchResults.flights,
               context: {
                 conversationId: conversation_id,
                 lastFlightSearch: {
@@ -269,7 +271,7 @@ class WebhookController {
                   startDate: correctedCheckIn,
                   endDate: correctedCheckOut,
                   travelers,
-                  results: flightsWithLinks
+                  results: searchResults.flights
                 },
                 tripSearchInitiated: true,
                 tripSearchTimestamp: new Date().toISOString()
@@ -278,20 +280,25 @@ class WebhookController {
 
             // Send SMS with flight results and booking links
             await twilioService.sendLongSMS(phoneNumber, smsMessage);
-            console.log(`✅ Sent flight results with airline deeplinks via SMS to ${phoneNumber}`);
+            console.log(`✅ Sent flight results with white-label booking link via SMS to ${phoneNumber}`);
           }
 
           // Return success response to ElevenLabs
-          const bestFlight = flightsWithLinks[0];
+          const bestFlight = searchResults.flights[0];
+          const stops = bestFlight.transfers;
+          const stopsInfo = stops !== null && stops !== undefined
+            ? ` ${stops === 0 ? '(Direct)' : `(${stops} stop${stops > 1 ? 's' : ''})`}`
+            : '';
+
           res.json({
             result: phoneNumber
-              ? `${dateWarning}Perfect! I found ${flightsWithLinks.length} flights from ${origin} to ${destination}. Best option: ${bestFlight.airline.name} for $${Math.round(bestFlight.price)}. Check your texts for all options with direct booking links!`
-              : `${dateWarning}I found ${flightsWithLinks.length} flights from ${origin} to ${destination}. The best option is ${bestFlight.airline.name} for $${Math.round(bestFlight.price)} (${bestFlight.duration.text}).`,
+              ? `${dateWarning}Perfect! I found ${searchResults.flights.length} flights from ${origin} to ${destination}. Best option: ${bestFlight.airline || 'Various'} for $${Math.round(bestFlight.priceValue)}${stopsInfo}. Check your texts for all options with booking link!`
+              : `${dateWarning}I found ${searchResults.flights.length} flights from ${origin} to ${destination}. The best option is ${bestFlight.airline || 'Various'} for $${Math.round(bestFlight.priceValue)}${stopsInfo}.`,
             success: true
           });
 
         } catch (searchError) {
-          console.error('Duffel flight search error:', searchError);
+          console.error('Flight search error:', searchError);
 
           // Send error message via SMS if phone available
           if (phoneNumber) {
