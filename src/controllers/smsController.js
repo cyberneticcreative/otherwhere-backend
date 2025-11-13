@@ -202,9 +202,9 @@ class SMSController {
 
           // Show top 3 flights
           flightResults.flights.slice(0, 3).forEach((flight, idx) => {
-            // Extract price
-            const priceValue = flight.priceValue || flight.price || 0;
-            const price = `$${Math.round(priceValue)}`;
+            // Extract price - use priceValue (number) not price (formatted string)
+            const priceValue = flight.priceValue !== undefined && flight.priceValue !== null ? flight.priceValue : 0;
+            const price = priceValue > 0 ? `$${Math.round(priceValue)}` : flight.price || 'Search';
 
             flightMessage += `${idx + 1}. ${price}`;
             // Only show stops if we have reliable data (not null/undefined)

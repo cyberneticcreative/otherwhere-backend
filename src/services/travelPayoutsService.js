@@ -152,7 +152,13 @@ class TravelPayoutsService {
           origin: originCity,
           destination: destCity,
           dates: `${departDate} - ${returnDate || 'one-way'}`,
-          travelers: travelers || 1
+          travelers: travelers || 1,
+          // Additional fields for URL building
+          outboundDate: departDate,
+          returnDate: returnDate,
+          passengers: travelers || 1,
+          cabinClass: 'economy',
+          currency: budget?.currency || 'USD'
         }
       };
 
@@ -256,11 +262,16 @@ class TravelPayoutsService {
     const startDate = tripData.startDate || tripData.check_in || tripData.depart_date;
     const endDate = tripData.endDate || tripData.check_out || tripData.return_date;
 
-    // Sort by price
-    const sorted = flights.sort((a, b) => (a.price || 0) - (b.price || 0));
+    // Sort by price - v1 API uses 'value', v3 uses 'price'
+    const sorted = flights.sort((a, b) => {
+      const priceA = a.price !== undefined ? a.price : (a.value || 0);
+      const priceB = b.price !== undefined ? b.price : (b.value || 0);
+      return priceA - priceB;
+    });
 
     return sorted.slice(0, 5).map((flight, index) => {
-      const price = flight.price || 0;
+      // v1 API uses 'value', v3 API uses 'price'
+      const price = flight.price !== undefined ? flight.price : (flight.value || 0);
       const currency = flight.currency || tripData.budget?.currency || 'USD';
 
       // Data API format: transfers, airline
@@ -343,21 +354,29 @@ class TravelPayoutsService {
    * @returns {string} White-label booking URL
    */
   buildWhiteLabelURL(tripData, sessionId = null) {
-    // Normalize field names
-    const origin = tripData.origin;
-    const destination = tripData.destination;
-    const startDate = tripData.startDate || tripData.check_in || tripData.depart_date;
-    const endDate = tripData.endDate || tripData.check_out || tripData.return_date;
+    try {
+      // Normalize field names
+      const origin = tripData.origin;
+      const destination = tripData.destination;
+      const startDate = tripData.startDate || tripData.check_in || tripData.depart_date;
+      const endDate = tripData.endDate || tripData.check_out || tripData.return_date;
 
-    // Extract passenger details
-    const adults = tripData.adults || tripData.travelers || 1;
-    const children = tripData.children || 0;
-    const infants = tripData.infants || 0;
-    const totalTravelers = adults + children + infants;
+      console.log(`[TravelPayouts] Building white-label URL: ${origin} → ${destination}, ${startDate} to ${endDate || 'one-way'}`);
 
-    // Extract airport codes
-    const originCode = this.extractCityCode(origin);
-    const destCode = this.extractCityCode(destination);
+      if (!origin || !destination || !startDate) {
+        throw new Error('Missing required fields: origin, destination, or startDate');
+      }
+
+      // Extract passenger details
+      const adults = tripData.adults || tripData.travelers || 1;
+      const children = tripData.children || 0;
+      const infants = tripData.infants || 0;
+      const totalTravelers = adults + children + infants;
+
+      // Extract airport codes
+      const originCode = this.extractCityCode(origin);
+      const destCode = this.extractCityCode(destination);
+      console.log(`[TravelPayouts] Airport codes: ${originCode} → ${destCode}`);
 
     // Format dates as MMDD (e.g., 0912 for Sept 12)
     const formatDate = (dateStr) => {
@@ -410,11 +429,20 @@ class TravelPayoutsService {
       // Note: marker param removed - subdomain ownership provides automatic attribution
     });
 
-    if (sessionId) {
-      params.set('subid', `ow_${sessionId}`);
-    }
+      if (sessionId) {
+        params.set('subid', `ow_${sessionId}`);
+      }
 
-    return `https://${AVIASALES_WL_HOST}/?${params.toString()}`;
+      const url = `https://${AVIASALES_WL_HOST}/?${params.toString()}`;
+      console.log(`[TravelPayouts] ✅ Built white-label URL: ${url}`);
+      return url;
+
+    } catch (error) {
+      console.error('[TravelPayouts] ❌ Error building white-label URL:', error.message);
+      console.error('[TravelPayouts] Trip data:', JSON.stringify(tripData));
+      // Return fallback URL to Google Flights
+      return `https://www.google.com/travel/flights`;
+    }
   }
 
   /**
