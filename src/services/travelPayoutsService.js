@@ -378,11 +378,12 @@ class TravelPayoutsService {
       const destCode = this.extractCityCode(destination);
       console.log(`[TravelPayouts] Airport codes: ${originCode} → ${destCode}`);
 
-    // Format dates as MMDD (e.g., 0912 for Sept 12)
+    // Format dates as DDMM (e.g., 1209 for Sept 12)
+    // Aviasales white-label uses DDMM format!
     const formatDate = (dateStr) => {
       // Parse YYYY-MM-DD directly to avoid timezone issues
       const [year, month, day] = dateStr.split('-');
-      return `${month}${day}`;
+      return `${day}${month}`;  // DDMM format
     };
 
     const departDate = formatDate(startDate);
@@ -390,8 +391,8 @@ class TravelPayoutsService {
 
     // Determine cabin class code (embedded in flightSearch string)
     // Based on actual URL format from book.otherwhere.world:
-    // - Economy simple: YVR0912YTO11122 (2 passengers total)
-    // - Business detailed: YVR0912YTO1112c121 (c + 1 adult + 2 children + 1 infant)
+    // - Economy simple: YVR1209YTO12112 (2 passengers total) [DDMM format]
+    // - Business detailed: YVR1209YTO1211c121 (c + 1 adult + 2 children + 1 infant) [DDMM format]
     const cabinMap = {
       'economy': '',      // no letter for economy
       'business': 'c',    // c for business
@@ -418,10 +419,10 @@ class TravelPayoutsService {
     }
 
     // Build flightSearch parameter
-    // Format: {origin}{MMDD}{dest}{MMDD}{passengers}
+    // Format: {origin}{DDMM}{dest}{DDMM}{passengers}
     // Examples:
-    //   YVR0912YTO11121 = YVR Sept-12 to YTO Nov-12, 1 passenger economy
-    //   YVR0912YTO1112c121 = YVR Sept-12 to YTO Nov-12, business, 1+2+1
+    //   YVR1209YTO12111 = YVR Sept-12 to YTO Nov-12, 1 passenger economy [DDMM]
+    //   YVR1209YTO1211c121 = YVR Sept-12 to YTO Nov-12, business, 1+2+1 [DDMM]
     const flightSearch = `${originCode}${departDate}${destCode}${returnDate}${passengerString}`;
 
     const params = new URLSearchParams({

@@ -109,18 +109,57 @@ class WebhookController {
 
       console.log('Payload:', JSON.stringify(req.body, null, 2));
 
-      const { tool_name, parameters, conversation_id, metadata } = req.body;
+      // ElevenLabs may send different payload structures
+      // Check for both formats: {tool_name, parameters} and direct parameters
+      let tool_name = req.body.tool_name || req.body.function_name;
+      let parameters = req.body.parameters || req.body;
+      const conversation_id = req.body.conversation_id || req.body.conversationId;
+      const metadata = req.body.metadata;
+
+      // If parameters is the entire body, we need to extract actual parameters
+      // Check if body contains parameter-like fields (destination, origin, etc.)
+      if (!tool_name && (req.body.destination || req.body.object)) {
+        // Direct parameter payload - assume it's search_trips
+        tool_name = 'search_trips';
+        parameters = req.body;
+        console.log('📦 Detected direct parameter payload, assuming search_trips');
+      }
+
+      if (!tool_name) {
+        console.error('❌ No tool_name found in payload');
+        return res.status(400).json({
+          result: 'Missing tool_name in request',
+          success: false,
+          error: 'tool_name is required'
+        });
+      }
+
+      console.log(`🔧 Tool: ${tool_name}, Parameters:`, parameters);
 
       // Handle search_trips function
       if (tool_name === 'search_trips') {
+        // Handle both 'destination' and 'object' (ElevenLabs sometimes uses 'object')
         const {
-          destination,
+          destination: dest,
+          object: obj,
           origin = 'LAX',
           check_in,
           check_out,
           travelers = 1,
           budget_usd
         } = parameters;
+
+        // Use whichever field is present
+        const destination = dest || obj;
+
+        if (!destination) {
+          console.error('❌ No destination provided (checked both "destination" and "object" fields)');
+          return res.status(400).json({
+            result: 'Missing destination parameter',
+            success: false,
+            error: 'destination is required'
+          });
+        }
 
         console.log(`🛫 Processing search_trips for ${destination}`);
 
