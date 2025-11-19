@@ -128,6 +128,10 @@ app.use('/flights', flightsRouter);
 const goFlightsRouter = require('./routes/goFlights');
 app.use('/go/flights', goFlightsRouter);
 
+// Stays/Accommodation routes
+const staysRouter = require('./routes/stays');
+app.use('/api/stays', staysRouter);
+
 // ARCHIVED: Old Flight search API endpoints (replaced by Duffel Links)
 app.post('/api/flights/search', async (req, res) => {
   try {

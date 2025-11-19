@@ -4,6 +4,7 @@ const assistantService = require('../services/assistantService');
 const sessionManager = require('../services/sessionManager');
 const travelPayoutsService = require('../services/travelPayoutsService');
 const airbnbService = require('../services/airbnbService');
+const staysService = require('../services/staysService');
 
 class SMSController {
   /**
@@ -263,79 +264,59 @@ class SMSController {
         }
       }
 
-      // If we have accommodation results, send them as a separate SMS
+      // If we have accommodation results, create a search and send frontend link
       if (accommodationResults && accommodationResults.properties && accommodationResults.properties.length > 0) {
-        console.log('🏠 Sending accommodation results as separate SMS...');
+        console.log('🏠 Creating stays search and sending frontend link...');
 
-        // Store accommodation results and search details in session so user can select one later
+        // Create search in stays service
+        const searchId = staysService.createSearch({
+          phoneNumber: from,
+          location: accommodationResults.destinationName,
+          checkIn: accommodationResults.searchParams?.checkIn,
+          checkOut: accommodationResults.searchParams?.checkOut,
+          guests: accommodationResults.searchParams?.guests || 2,
+          results: accommodationResults.properties,
+          searchParams: accommodationResults.searchParams
+        });
+
+        // Store accommodation results and search details in session
         await sessionManager.updateSession(from, {
           lastAccommodationResults: accommodationResults.properties,
           lastAccommodationSearch: {
             destination: accommodationResults.destinationName,
             checkIn: accommodationResults.searchParams?.checkIn,
-            checkOut: accommodationResults.searchParams?.checkOut
+            checkOut: accommodationResults.searchParams?.checkOut,
+            searchId: searchId
           }
         });
-        console.log(`💾 Stored ${accommodationResults.properties.length} properties in session for ${from}`);
+        console.log(`💾 Created search ${searchId} with ${accommodationResults.properties.length} properties`);
 
-        // Format accommodation message (supports both Airbnb and Hotels.com)
-        const formatAccommodationMessage = (properties, searchInfo) => {
-          if (!properties || properties.length === 0) {
-            return 'Sorry, no accommodations found.';
-          }
+        // Get the frontend URL from environment or use default
+        const frontendUrl = process.env.FRONTEND_URL || 'https://otherwhere-frontend-production.up.railway.app';
+        const staysUrl = `${frontendUrl}/search/${searchId}?phone=${encodeURIComponent(from)}`;
 
-          const { checkIn, checkOut, destinationName } = searchInfo;
-
-          // Compact date format (MM/DD)
-          const formatDate = (dateStr) => {
-            if (!dateStr) return '';
-            const parts = dateStr.split('-');
-            if (parts.length === 3) return `${parts[1]}/${parts[2]}`;
-            return dateStr;
-          };
-
-          const dateRange = checkIn && checkOut ? ` ${formatDate(checkIn)}-${formatDate(checkOut)}` : '';
-          const header = `🏠 ${destinationName || 'Your destination'}${dateRange}\n\n`;
-
-          const propertiesList = properties.map(property => {
-            const price = `$${property.pricePerNight}/nt`;
-            const ratingDisplay = property.rating !== 'New' ? `⭐${property.rating}` : '⭐New';
-
-            // Show source indicator (Airbnb or Hotel)
-            const sourceIcon = property.source === 'hotel' ? '🏨' : '🏠';
-
-            // Compact name (max 28 chars to fit source icon)
-            const shortName = property.name.length > 28
-              ? property.name.substring(0, 25) + '...'
-              : property.name;
-
-            // Property type info
-            const typeInfo = property.source === 'hotel' && property.starRating
-              ? `${property.starRating}★ Hotel`
-              : property.propertyType || 'Property';
-
-            return `${property.index}. ${sourceIcon} ${shortName} - ${price}\n${typeInfo} ${ratingDisplay}`;
-          }).join('\n\n');
-
-          return `${header}${propertiesList}\n\nReply 1-${properties.length} for booking link`;
+        // Compact date format (MM/DD)
+        const formatDate = (dateStr) => {
+          if (!dateStr) return '';
+          const parts = dateStr.split('-');
+          if (parts.length === 3) return `${parts[1]}/${parts[2]}`;
+          return dateStr;
         };
 
-        const accommodationMessage = formatAccommodationMessage(
-          accommodationResults.properties,
-          {
-            destinationName: accommodationResults.destinationName,
-            checkIn: accommodationResults.searchParams?.checkIn,
-            checkOut: accommodationResults.searchParams?.checkOut
-          }
-        );
+        const checkIn = accommodationResults.searchParams?.checkIn;
+        const checkOut = accommodationResults.searchParams?.checkOut;
+        const dateRange = checkIn && checkOut ? ` ${formatDate(checkIn)}-${formatDate(checkOut)}` : '';
 
-        // Send accommodation details as a second SMS (async)
+        // Send short message with link to frontend
+        const accommodationMessage = `🏠 Found ${accommodationResults.properties.length} great places in ${accommodationResults.destinationName}${dateRange}!\n\nBrowse & pick your favorite:\n${staysUrl}`;
+
+        // Send accommodation link as a second SMS (async)
         twilioService.sendLongSMS(from, accommodationMessage)
           .then(() => {
-            console.log('✅ Accommodation results SMS sent');
+            console.log('✅ Accommodation link SMS sent');
           })
           .catch((smsError) => {
-            console.error('❌ Failed to send accommodation results SMS:', smsError);
+            console.error('❌ Failed to send accommodation link SMS:', smsError);
           });
       }
 
