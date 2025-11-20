@@ -6,6 +6,7 @@ const duffelFlightsService = require('../services/duffelFlightsService');
 const airlineDeepLinksService = require('../services/airlineDeepLinksService');
 const airportResolverService = require('../services/airportResolverService');
 const airbnbService = require('../services/airbnbService');
+const tripService = require('../services/tripService');
 
 class WebhookController {
   /**
@@ -56,15 +57,24 @@ class WebhookController {
 
         case 'conversation.ended':
           console.log(`Conversation ended: ${conversationId}`);
-          if (metadata?.userId) {
-            const session = await sessionManager.getSession(metadata.userId);
-            await sessionManager.updateSession(metadata.userId, {
+          if (metadata?.userId || metadata?.from) {
+            const phoneNumber = metadata.userId || metadata.from;
+            const session = await sessionManager.getSession(phoneNumber);
+
+            // Extract trip data from conversation if available
+            const tripData = metadata?.tripData || {};
+
+            await sessionManager.updateSession(phoneNumber, {
               context: {
                 ...session.context,
                 lastConversationId: conversationId,
-                conversationEndedAt: new Date().toISOString()
+                conversationEndedAt: new Date().toISOString(),
+                voiceTripData: tripData // Store for SMS handoff
               }
             });
+
+            // Trigger SMS handoff (voice → SMS)
+            await this.handleVoiceToSMSHandoff(phoneNumber, tripData, session);
           }
           break;
 
@@ -536,6 +546,125 @@ class WebhookController {
         success: false,
         error: error.message
       });
+    }
+  }
+
+  /**
+   * Handle voice-to-SMS handoff after call ends
+   * Sends appropriate SMS based on what data was captured during the call
+   * @param {string} phoneNumber - User's phone number
+   * @param {Object} tripData - Trip data captured from voice call
+   * @param {Object} session - User's session data
+   */
+  async handleVoiceToSMSHandoff(phoneNumber, tripData, session) {
+    try {
+      console.log('📞→💬 Starting voice-to-SMS handoff for:', phoneNumber);
+      console.log('Trip data captured:', tripData);
+
+      const { destination, origin, startDate, endDate, check_in, check_out, travelers } = tripData;
+
+      // Normalize dates (support both startDate/endDate and check_in/check_out)
+      const departureDate = startDate || check_in;
+      const returnDate = endDate || check_out;
+
+      // Determine completeness of captured data
+      const hasDestination = !!destination;
+      const hasOrigin = !!origin;
+      const hasDates = !!departureDate && !!returnDate;
+      const hasCompleteTripData = hasDestination && hasOrigin && hasDates;
+
+      let smsMessage = '';
+
+      if (hasCompleteTripData) {
+        // Complete data: Create trip and acknowledge
+        console.log('✅ Complete trip data captured, creating trip...');
+
+        const tripId = await tripService.createTrip({
+          phoneNumber,
+          destination,
+          origin,
+          departureDate,
+          returnDate,
+          travelers: parseInt(travelers) || 1,
+          source: 'voice',
+          status: 'planning'
+        });
+
+        // Update session with trip ID
+        await sessionManager.updateSession(phoneNumber, {
+          currentTripId: tripId,
+          bookingState: 'planning',
+          context: {
+            ...session.context,
+            tripCreatedVia: 'voice'
+          }
+        });
+
+        smsMessage = `Thanks for calling! 🎉\n\nI've got all your details for ${destination}.\n\nI'll search for options and text you shortly with flights and accommodations. This usually takes a minute or two!`;
+
+      } else if (hasDestination && !hasDates) {
+        // Partial data: Has destination but missing dates
+        console.log('⚠️ Partial trip data: destination only');
+
+        // Update session context
+        await sessionManager.updateSession(phoneNumber, {
+          bookingState: 'planning',
+          context: {
+            ...session.context,
+            partialTripData: { destination, origin },
+            needsDates: true
+          }
+        });
+
+        smsMessage = `We got your call about a trip to ${destination}! 🌍\n\nText me your travel dates (when you want to leave and come back) and I'll find the best options for you.`;
+
+      } else if (hasDestination) {
+        // Minimal data: Just destination
+        console.log('⚠️ Minimal trip data: basic info only');
+
+        await sessionManager.updateSession(phoneNumber, {
+          bookingState: 'planning',
+          context: {
+            ...session.context,
+            partialTripData: { destination }
+          }
+        });
+
+        smsMessage = `Thanks for calling about ${destination}! 🗺️\n\nText me where you're flying from and your travel dates, and I'll help you plan this trip.`;
+
+      } else {
+        // No meaningful data captured
+        console.log('⚠️ No trip data captured during call');
+
+        smsMessage = `We noticed you called Otherwhere! 👋\n\nText me where you want to go and I'll help you find amazing travel options.`;
+      }
+
+      // Send SMS handoff message
+      await twilioService.sendSMS(phoneNumber, smsMessage);
+      console.log(`✅ Voice-to-SMS handoff complete for ${phoneNumber}`);
+
+      // If we have complete data, trigger search in background
+      if (hasCompleteTripData) {
+        console.log('🔍 Triggering background search for complete trip data...');
+        // Note: The actual search will be handled by the trip planning flow
+        // We just need to mark that it's ready
+        await sessionManager.updateSession(phoneNumber, {
+          bookingState: 'booking_intent'
+        });
+      }
+
+    } catch (error) {
+      console.error('❌ Error in voice-to-SMS handoff:', error);
+
+      // Send fallback SMS on error
+      try {
+        await twilioService.sendSMS(
+          phoneNumber,
+          "Thanks for calling! 📞\n\nText me where you'd like to go and I'll help you plan your trip."
+        );
+      } catch (smsError) {
+        console.error('Failed to send fallback SMS:', smsError);
+      }
     }
   }
 

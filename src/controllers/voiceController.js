@@ -4,6 +4,7 @@ const assistantService = require('../services/assistantService');
 const realtimeService = require('../services/realtimeService');
 const elevenLabsService = require('../services/elevenLabsService');
 const sessionManager = require('../services/sessionManager');
+const tripService = require('../services/tripService');
 
 class VoiceController {
   /**
@@ -17,19 +18,43 @@ class VoiceController {
 
       console.log(`📞 Inbound call from ${from}: ${callSid}`);
 
-      // Get or create session
+      // Get or create session (phone number = universal user ID)
       const session = await sessionManager.getSession(from);
+
+      // Mark onboarding via voice if new user
+      if (!session.onboardedVia) {
+        await sessionManager.updateSession(from, {
+          onboardedVia: 'voice',
+          channel: 'voice'
+        });
+        console.log(`🎤 New user onboarded via voice: ${from}`);
+      }
+
+      // Update session with call details
       await sessionManager.updateSession(from, {
         channel: 'voice',
-        context: { ...session.context, currentCallSid: callSid }
+        context: {
+          ...session.context,
+          currentCallSid: callSid,
+          homeAirport: session.context?.homeAirport // Pass existing home airport if available
+        }
       });
 
       // Priority 1: Use ElevenLabs if configured (better quality)
       if (elevenLabsService.isConfigured() && process.env.ELEVENLABS_VOICE_AGENT_ID) {
         console.log('🎙️ Using ElevenLabs for voice call');
 
-        // Transfer call to ElevenLabs agent
+        // Transfer call to ElevenLabs agent with user context
         const agentId = process.env.ELEVENLABS_VOICE_AGENT_ID;
+
+        // Prepare user context for the agent
+        const userContext = {
+          phoneNumber: from,
+          callSid: callSid,
+          hasProfile: !!session.onboardedVia,
+          homeAirport: session.context?.homeAirport || null,
+          previousTrips: tripService.getTripsByPhone(from).length
+        };
 
         // Generate TwiML to handoff to ElevenLabs
         const twiml = `<?xml version="1.0" encoding="UTF-8"?>
@@ -39,6 +64,7 @@ class VoiceController {
     <ConversationalAI agentId="${agentId}">
       <Parameter name="from" value="${from}" />
       <Parameter name="callSid" value="${callSid}" />
+      <Parameter name="userContext" value="${Buffer.from(JSON.stringify(userContext)).toString('base64')}" />
     </ConversationalAI>
   </Connect>
 </Response>`;
@@ -224,25 +250,90 @@ class VoiceController {
       CallSid: callSid,
       CallStatus: status,
       From: from,
-      Duration: duration
+      Duration: duration,
+      CallDuration: callDuration
     } = req.body;
 
-    console.log(`📊 Call Status: ${callSid} - ${status}`);
+    console.log(`📊 Call Status: ${callSid} - ${status} (Duration: ${duration || callDuration || 0}s)`);
 
-    if (status === 'completed' && from) {
-      // Clean up session context on call completion
-      const session = await sessionManager.getSession(from);
-      if (session.context?.currentCallSid === callSid) {
-        await sessionManager.updateSession(from, {
-          context: {
-            ...session.context,
-            currentCallSid: null,
-            lastCallDuration: duration
-          }
-        });
+    try {
+      if (from) {
+        const session = await sessionManager.getSession(from);
+
+        // Handle different call statuses
+        switch (status) {
+          case 'completed':
+            // Normal call completion
+            const finalDuration = parseInt(duration || callDuration || 0);
+
+            if (session.context?.currentCallSid === callSid) {
+              await sessionManager.updateSession(from, {
+                context: {
+                  ...session.context,
+                  currentCallSid: null,
+                  lastCallDuration: finalDuration,
+                  lastCallStatus: 'completed',
+                  lastCallEndedAt: new Date().toISOString()
+                }
+              });
+
+              // Detect dropped calls (very short duration)
+              if (finalDuration < 10) {
+                console.log(`⚠️ Short call detected (${finalDuration}s) - likely dropped`);
+
+                // Send SMS for dropped call
+                const twilioService = require('../services/twilioService');
+                await twilioService.sendSMS(
+                  from,
+                  "Looks like we got disconnected! 📞\n\nNo worries - text me where you'd like to go and I'll help you plan your trip."
+                );
+              }
+            }
+
+            console.log(`✅ Call completed. Duration: ${finalDuration}s`);
+            break;
+
+          case 'busy':
+          case 'no-answer':
+          case 'failed':
+          case 'canceled':
+            // Call didn't connect - log but don't trigger handoff
+            console.log(`⚠️ Call not connected: ${status}`);
+
+            if (session.context?.currentCallSid === callSid) {
+              await sessionManager.updateSession(from, {
+                context: {
+                  ...session.context,
+                  currentCallSid: null,
+                  lastCallStatus: status,
+                  lastCallEndedAt: new Date().toISOString()
+                }
+              });
+            }
+
+            // For failed calls, send a helpful SMS
+            if (status === 'failed' || status === 'busy') {
+              const twilioService = require('../services/twilioService');
+              await twilioService.sendSMS(
+                from,
+                "We couldn't connect your call right now. 😔\n\nNo problem - just text me where you want to go and I'll help you plan an amazing trip!"
+              );
+            }
+            break;
+
+          case 'in-progress':
+          case 'ringing':
+            // Call in progress - just log
+            console.log(`📞 Call ${status}`);
+            break;
+
+          default:
+            console.log(`Unknown call status: ${status}`);
+        }
       }
-
-      console.log(`Call completed. Duration: ${duration}s`);
+    } catch (error) {
+      console.error('❌ Error handling call status callback:', error);
+      // Don't fail the webhook response
     }
 
     res.sendStatus(200);
