@@ -132,6 +132,11 @@ app.use('/go/flights', goFlightsRouter);
 const staysRouter = require('./routes/stays');
 app.use('/api/stays', staysRouter);
 
+// Onboarding routes (web entry, traveler data collection)
+const onboardingRouter = require('./routes/onboarding');
+app.use('/api/onboarding', onboardingRouter);
+app.use('/api', onboardingRouter); // Also mount at /api for /api/trips/:tripId/travelers
+
 // ARCHIVED: Old Flight search API endpoints (replaced by Duffel Links)
 app.post('/api/flights/search', async (req, res) => {
   try {

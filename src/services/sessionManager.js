@@ -57,14 +57,19 @@ class SessionManager {
       conversationHistory: [],
       context: {},
       tripDetails: null,
-      channel: null, // 'sms' or 'voice'
+      channel: null, // 'sms' or 'voice' or 'web'
+      onboardedVia: null, // 'sms', 'voice', or 'web'
       threadId: null, // OpenAI Assistant thread ID
+      // Trip tracking
+      currentTripId: null, // Active trip ID
+      bookingState: 'planning', // 'planning', 'booking_intent', 'awaiting_data', 'booking', 'booked'
       // Flight-related session data
       lastFlightResults: null, // Array of formatted flight results
       lastFlightSearch: null, // Last flight search parameters
       // Accommodation-related session data
       lastAccommodationResults: null, // Array of formatted accommodation results
       lastAccommodationSearch: null, // Last accommodation search parameters
+      lastAccommodationSelection: null, // Selected accommodation details
       // Search flow tracking
       searchType: null, // 'flights' | 'accommodations' | 'both'
       flightsCompleted: false, // For "both" flow sequencing
