@@ -5,6 +5,7 @@ const sessionManager = require('../services/sessionManager');
 const travelPayoutsService = require('../services/travelPayoutsService');
 const airbnbService = require('../services/airbnbService');
 const staysService = require('../services/staysService');
+const userProfileService = require('../services/userProfileService');
 
 class SMSController {
   /**
@@ -23,6 +24,19 @@ class SMSController {
       // Get or create session
       let session = await sessionManager.getSession(from);
       await sessionManager.updateSession(from, { channel: 'sms' });
+
+      // Create user profile in PostgreSQL if new user (SMS-first onboarding)
+      if (!session.onboardedVia) {
+        try {
+          await userProfileService.getOrCreateUser(from, {
+            onboardedVia: 'sms'
+          });
+          await sessionManager.updateSession(from, { onboardedVia: 'sms' });
+          console.log(`📱 User profile created in database for ${from}`);
+        } catch (dbError) {
+          console.warn(`Database operation failed:`, dbError.message);
+        }
+      }
 
       // Re-fetch session to get latest data (in case it was updated by flight results)
       session = await sessionManager.getSession(from);

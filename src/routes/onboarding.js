@@ -3,6 +3,7 @@ const router = express.Router();
 const sessionManager = require('../services/sessionManager');
 const tripService = require('../services/tripService');
 const twilioService = require('../services/twilioService');
+const userProfileService = require('../services/userProfileService');
 
 /**
  * Web Entry Point - Landing Page Submission
@@ -29,6 +30,18 @@ router.post('/web', async (req, res) => {
     let normalizedPhone = phoneNumber.trim();
     if (!normalizedPhone.startsWith('+')) {
       normalizedPhone = `+1${normalizedPhone.replace(/\D/g, '')}`;
+    }
+
+    // Get or create user profile in PostgreSQL
+    try {
+      await userProfileService.getOrCreateUser(normalizedPhone, {
+        homeAirport: homeAirport?.trim() || null,
+        onboardedVia: 'web'
+      });
+      console.log(`[Onboarding] User profile created/updated in database`);
+    } catch (dbError) {
+      // Log but don't fail - database is optional
+      console.warn(`[Onboarding] Database operation failed:`, dbError.message);
     }
 
     // Get or create session (phone number is the universal ID)

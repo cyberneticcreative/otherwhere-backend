@@ -137,6 +137,10 @@ const onboardingRouter = require('./routes/onboarding');
 app.use('/api/onboarding', onboardingRouter);
 app.use('/api', onboardingRouter); // Also mount at /api for /api/trips/:tripId/travelers
 
+// User profile routes (for Softr integration)
+const usersRouter = require('./routes/users');
+app.use('/api/users', usersRouter);
+
 // ARCHIVED: Old Flight search API endpoints (replaced by Duffel Links)
 app.post('/api/flights/search', async (req, res) => {
   try {

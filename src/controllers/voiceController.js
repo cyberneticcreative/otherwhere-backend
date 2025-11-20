@@ -5,6 +5,7 @@ const realtimeService = require('../services/realtimeService');
 const elevenLabsService = require('../services/elevenLabsService');
 const sessionManager = require('../services/sessionManager');
 const tripService = require('../services/tripService');
+const userProfileService = require('../services/userProfileService');
 
 class VoiceController {
   /**
@@ -23,6 +24,16 @@ class VoiceController {
 
       // Mark onboarding via voice if new user
       if (!session.onboardedVia) {
+        // Create user profile in PostgreSQL
+        try {
+          await userProfileService.getOrCreateUser(from, {
+            onboardedVia: 'voice'
+          });
+          console.log(`🎤 User profile created in database for ${from}`);
+        } catch (dbError) {
+          console.warn(`Database operation failed:`, dbError.message);
+        }
+
         await sessionManager.updateSession(from, {
           onboardedVia: 'voice',
           channel: 'voice'
