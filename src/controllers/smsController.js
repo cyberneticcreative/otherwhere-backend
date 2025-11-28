@@ -136,6 +136,44 @@ class SMSController {
         }
       }
 
+      // Check if user is requesting a flight time preference change after seeing flight results
+      // This handles messages like "afternoon", "later", "morning flight", "evening departure", etc.
+      if (session.lastFlightResults && session.context?.lastFlightSearch) {
+        const bodyLower = body.toLowerCase().trim();
+        const timePreferencePatterns = [
+          { pattern: /\b(afternoon|after\s*noon|pm\s*flight|later|after\s*12)\b/i, pref: 'afternoon' },
+          { pattern: /\b(morning|early|am\s*flight|before\s*noon)\b/i, pref: 'morning' },
+          { pattern: /\b(evening|after\s*(work|5|6)|night\s*flight)\b/i, pref: 'evening' },
+          { pattern: /\b(red[- ]?eye|overnight|late\s*night)\b/i, pref: 'red_eye' },
+          { pattern: /\b(no\s*red[- ]?eye|daytime|avoid\s*overnight)\b/i, pref: 'no_red_eye' },
+        ];
+
+        const matchedPref = timePreferencePatterns.find(p => p.pattern.test(bodyLower));
+
+        if (matchedPref) {
+          console.log(`⏰ User requesting time preference change: "${bodyLower}" → ${matchedPref.pref}`);
+
+          // Re-search with time preference
+          const lastSearch = session.context.lastFlightSearch;
+          const responseText = `Got it! Searching for ${matchedPref.pref} flights...`;
+
+          await twilioService.sendSMS(from, responseText);
+
+          // Trigger a new search via the assistant with time preference context
+          // Add the preference to the user message so the assistant picks it up
+          const enhancedMessage = `I want ${matchedPref.pref} flights. Search again for flights from ${lastSearch.origin} to ${lastSearch.destination} on ${lastSearch.startDate}${lastSearch.endDate ? ' returning ' + lastSearch.endDate : ''} with ${matchedPref.pref} departure times.`;
+
+          // Clear old flight results so new search happens
+          await sessionManager.updateSession(from, {
+            lastFlightResults: null
+          });
+
+          // Continue with enhanced message instead of original
+          body = enhancedMessage;
+          console.log(`📝 Enhanced message for time preference: "${enhancedMessage}"`);
+        }
+      }
+
       // Add user message to conversation history
       await sessionManager.addMessage(from, {
         role: 'user',
