@@ -6,6 +6,8 @@ const travelPayoutsService = require('../services/travelPayoutsService');
 const airbnbService = require('../services/airbnbService');
 const staysService = require('../services/staysService');
 const userProfileService = require('../services/userProfileService');
+const userPreferencesService = require('../services/userPreferencesService');
+const conversationExtractor = require('../services/conversationExtractor');
 
 class SMSController {
   /**
@@ -35,6 +37,31 @@ class SMSController {
           console.log(`📱 User profile created in database for ${from}`);
         } catch (dbError) {
           console.warn(`Database operation failed:`, dbError.message);
+        }
+      }
+
+      // Load user preferences from database if not already in session
+      if (!session.userPreferences) {
+        try {
+          const prefs = await userPreferencesService.getPreferences(from);
+          if (prefs) {
+            await sessionManager.updateSession(from, {
+              userPreferences: {
+                preferredClass: prefs.preferred_class,
+                preferredAirlines: prefs.preferred_airlines,
+                avoidedAirlines: prefs.avoided_airlines,
+                preferredAirports: prefs.preferred_airports,
+                avoidedAirports: prefs.avoided_airports,
+                departureTimePreference: prefs.departure_time_preference,
+                maxStops: prefs.max_stops,
+                connectionPreference: prefs.connection_preference,
+                budgetFlexibility: prefs.budget_flexibility
+              }
+            });
+            console.log(`📋 Loaded user preferences from database for ${from}`);
+          }
+        } catch (prefError) {
+          console.warn(`Could not load preferences:`, prefError.message);
         }
       }
 
@@ -115,6 +142,12 @@ class SMSController {
         content: body
       });
 
+      // Extract preferences from natural language (runs in background, doesn't block)
+      // This parses things like "biz class", "avoid LAX", "I like United", etc.
+      this.extractAndSavePreferences(from, body, session).catch(err => {
+        console.warn('Preference extraction failed (non-blocking):', err.message);
+      });
+
       // Decide whether to use OpenAI Assistant or direct LLM
       const useAssistant = assistantService.isConfigured();
 
@@ -136,14 +169,15 @@ class SMSController {
             session.threadId = threadId;
           }
 
-          // Send message to assistant with session context
+          // Send message to assistant with session context and user preferences
           const assistantResponse = await assistantService.sendMessage(
             session.threadId,
             body,
             {
               sessionContext: {
                 lastFlightSearch: session.lastFlightSearch,
-                lastAccommodationSearch: session.lastAccommodationSearch
+                lastAccommodationSearch: session.lastAccommodationSearch,
+                userPreferences: session.userPreferences
               }
             }
           );
@@ -212,28 +246,58 @@ class SMSController {
           // Get best booking URL (priority: proposal.link > white-label > /go/flights)
           const bookingUrl = travelPayoutsService.getBestBookingURL(flightResults, tripData, from);
 
+          // Check if round-trip (has return date)
+          const isRoundTrip = !!flightResults.searchParams?.returnDate;
+          const outboundDate = flightResults.searchParams?.outboundDate;
+          const returnDate = flightResults.searchParams?.returnDate;
+
+          // Helper to format date as "Jan 4"
+          const formatDateShort = (dateStr) => {
+            if (!dateStr) return '';
+            const date = new Date(dateStr);
+            return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+          };
+
           // Format flight message with booking link
-          let flightMessage = `✈️ Found ${flightResults.flights.length} flight${flightResults.flights.length > 1 ? 's' : ''}!\n\n`;
+          let flightMessage;
 
-          // Show top 3 flights
-          flightResults.flights.slice(0, 3).forEach((flight, idx) => {
-            // Extract price - use priceValue (number) not price (formatted string)
-            const priceValue = flight.priceValue !== undefined && flight.priceValue !== null ? flight.priceValue : 0;
-            const price = priceValue > 0 ? `$${Math.round(priceValue)}` : flight.price || 'Search';
+          if (isRoundTrip) {
+            // Round-trip bundled format
+            flightMessage = `Here are your flight options:\n\n`;
 
-            flightMessage += `${idx + 1}. ${price}`;
-            // Only show stops if we have reliable data (not null/undefined)
-            const stops = flight.stops !== undefined ? flight.stops : flight.transfers;
-            if (stops !== null && stops !== undefined) {
-              flightMessage += stops === 0 ? ' (Direct)' : ` (${stops} stop${stops > 1 ? 's' : ''})`;
-            }
+            flightResults.flights.slice(0, 3).forEach((flight, idx) => {
+              const priceValue = flight.priceValue !== undefined && flight.priceValue !== null ? flight.priceValue : 0;
+              const price = priceValue > 0 ? `$${Math.round(priceValue)} total` : flight.price || 'Search';
+              const airline = flight.airline || 'Various';
+              const stops = flight.stops !== undefined ? flight.stops : flight.transfers;
+              const stopText = stops !== null && stops !== undefined
+                ? (stops === 0 ? 'nonstop' : `${stops} stop${stops > 1 ? 's' : ''}`)
+                : '';
 
-            // Add airline if available
-            const airline = flight.airline || 'Various';
-            flightMessage += ` - ${airline}`;
+              flightMessage += `${idx + 1}. ${airline} — ${price}\n`;
+              flightMessage += `OUT: ${formatDateShort(outboundDate)}${stopText ? ` (${stopText})` : ''}\n`;
+              flightMessage += `RET: ${formatDateShort(returnDate)}${stopText ? ` (${stopText})` : ''}\n\n`;
+            });
 
-            flightMessage += `\n`;
-          });
+            flightMessage += `Reply "1" or "2" to choose, or say "show more".\n`;
+          } else {
+            // One-way format (original)
+            flightMessage = `✈️ Found ${flightResults.flights.length} flight${flightResults.flights.length > 1 ? 's' : ''}!\n\n`;
+
+            flightResults.flights.slice(0, 3).forEach((flight, idx) => {
+              const priceValue = flight.priceValue !== undefined && flight.priceValue !== null ? flight.priceValue : 0;
+              const price = priceValue > 0 ? `$${Math.round(priceValue)}` : flight.price || 'Search';
+
+              flightMessage += `${idx + 1}. ${price}`;
+              const stops = flight.stops !== undefined ? flight.stops : flight.transfers;
+              if (stops !== null && stops !== undefined) {
+                flightMessage += stops === 0 ? ' (Direct)' : ` (${stops} stop${stops > 1 ? 's' : ''})`;
+              }
+
+              const airline = flight.airline || 'Various';
+              flightMessage += ` - ${airline}\n`;
+            });
+          }
 
           flightMessage += `\n🔗 Book: ${bookingUrl}`;
 
@@ -356,6 +420,79 @@ class SMSController {
 
       res.type('text/xml');
       res.send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+    }
+  }
+
+  /**
+   * Extract preferences from user message and save silently
+   * This runs in the background without blocking the main response
+   * @param {string} phoneNumber - User's phone number
+   * @param {string} message - User's message
+   * @param {Object} session - Current session data
+   */
+  async extractAndSavePreferences(phoneNumber, message, session) {
+    try {
+      // Build context for extraction
+      const context = {
+        lastFlightSearch: session.lastFlightSearch,
+        lastAccommodationSearch: session.lastAccommodationSearch,
+        userPreferences: session.userPreferences
+      };
+
+      // Extract structured data from natural language
+      const extracted = await conversationExtractor.extractFromMessage(message, context);
+
+      // Get preference updates that should be saved (cabin class, airlines, etc.)
+      const preferenceUpdates = conversationExtractor.extractPreferenceUpdates(extracted);
+
+      if (preferenceUpdates) {
+        console.log(`💾 Silently saving preferences for ${phoneNumber}:`, preferenceUpdates);
+
+        // Update preferences in database (won't fail if DB not configured)
+        try {
+          await userPreferencesService.setPreferences(phoneNumber, preferenceUpdates);
+        } catch (dbErr) {
+          console.warn('Could not save preferences to DB:', dbErr.message);
+        }
+
+        // Also update session for immediate use
+        await sessionManager.updateSession(phoneNumber, {
+          userPreferences: {
+            ...(session.userPreferences || {}),
+            ...preferenceUpdates
+          }
+        });
+      }
+
+      // If loyalty programs were mentioned, save them too
+      if (extracted.loyalty_programs && extracted.loyalty_programs.length > 0) {
+        const loyaltyProgramService = require('../services/loyaltyProgramService');
+
+        for (const program of extracted.loyalty_programs) {
+          try {
+            if (program.type === 'airline') {
+              await loyaltyProgramService.addAirlineLoyaltyProgram(phoneNumber, {
+                airlineName: program.company,
+                programName: program.program_name,
+                programNumber: program.member_number || 'pending'
+              });
+            } else if (program.type === 'hotel') {
+              await loyaltyProgramService.addHotelLoyaltyProgram(phoneNumber, {
+                hotelChain: program.company,
+                programName: program.program_name,
+                programNumber: program.member_number || 'pending'
+              });
+            }
+            console.log(`💳 Saved ${program.type} loyalty program: ${program.company}`);
+          } catch (loyaltyErr) {
+            console.warn('Could not save loyalty program:', loyaltyErr.message);
+          }
+        }
+      }
+
+    } catch (error) {
+      // This is non-critical, just log and continue
+      console.warn('Preference extraction error (non-blocking):', error.message);
     }
   }
 
