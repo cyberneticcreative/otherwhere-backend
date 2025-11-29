@@ -53,7 +53,7 @@ Otherwhere is an intelligent travel concierge that helps users plan amazing trip
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/cyberneticcreative/otherwhere-backend.git
+git clone https://github.com/otherwhere666/otherwhere-backend.git
 cd otherwhere-backend
 ```
 
@@ -288,7 +288,7 @@ MIT License - See LICENSE file for details
 ## Support
 
 For issues and questions:
-- GitHub Issues: https://github.com/cyberneticcreative/otherwhere-backend/issues
+- GitHub Issues: https://github.com/otherwhere666/otherwhere-backend/issues
 - Email: support@otherwhere.ai
 
 ## Roadmap

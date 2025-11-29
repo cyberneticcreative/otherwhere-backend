@@ -7,6 +7,7 @@ const airlineDeepLinksService = require('../services/airlineDeepLinksService');
 const airportResolverService = require('../services/airportResolverService');
 const airbnbService = require('../services/airbnbService');
 const tripService = require('../services/tripService');
+const recommendationService = require('../services/recommendationService');
 
 class WebhookController {
   /**
@@ -530,6 +531,155 @@ class WebhookController {
           });
         }
 
+      } else if (tool_name === 'get_recommendations') {
+        // Handle recommendation mode for voice
+        const {
+          vibe,
+          timing,
+          budget,
+          travelers,
+          travelers_type
+        } = parameters;
+
+        console.log(`🎯 Processing get_recommendations for voice`);
+        console.log(`Preferences: vibe=${vibe}, timing=${timing}, budget=${budget}, travelers=${travelers}, type=${travelers_type}`);
+
+        // Get user phone number from parameters or metadata
+        const phoneNumber = parameters.phone_number || metadata?.phone_number || metadata?.from;
+
+        try {
+          // Map voice parameters to recommendation service format
+          const preferences = {
+            vibe: {
+              category: this.mapVibeToCategory(vibe),
+              raw: vibe
+            },
+            when: {
+              timing: timing,
+              raw: timing
+            },
+            budget: {
+              category: this.mapBudgetToCategory(budget),
+              raw: budget
+            },
+            who: {
+              category: this.mapTravelersToCategory(travelers_type),
+              count: parseInt(travelers) || 1,
+              raw: `${travelers} ${travelers_type || 'travelers'}`
+            }
+          };
+
+          // Generate recommendations
+          const recoResult = await recommendationService.generateRecommendations(preferences);
+
+          if (!recoResult.recommendations || recoResult.recommendations.length === 0) {
+            throw new Error('No recommendations generated');
+          }
+
+          // Format recommendations for voice (spoken format, no bullets)
+          const formattedRecos = recommendationService.formatRecommendationsForChannel(recoResult.recommendations);
+
+          // Save to session for SMS follow-up
+          if (phoneNumber) {
+            await sessionManager.updateSession(phoneNumber, {
+              recoMode: 'awaiting_selection',
+              recoPreferences: preferences,
+              recoRecommendations: recoResult.recommendations,
+              context: {
+                conversationId: conversation_id,
+                recommendationsGeneratedAt: new Date().toISOString()
+              }
+            });
+
+            // Send recommendations via SMS as well
+            await twilioService.sendLongSMS(phoneNumber, formattedRecos);
+            console.log(`✅ Sent recommendations via SMS to ${phoneNumber}`);
+          }
+
+          // Build voice-friendly response
+          const reco1 = recoResult.recommendations[0];
+          const reco2 = recoResult.recommendations[1];
+          const reco3 = recoResult.recommendations[2];
+
+          const voiceResponse = `I've got three great options for you. First: ${reco1.pitch} Second: ${reco2.pitch} Third: ${reco3.pitch} Any of these calling to you? Just tell me which one sounds right.`;
+
+          res.json({
+            result: phoneNumber
+              ? `${voiceResponse} I've also texted you the details so you can review them.`
+              : voiceResponse,
+            success: true,
+            recommendations: recoResult.recommendations
+          });
+
+        } catch (error) {
+          console.error('Recommendation generation error:', error);
+
+          res.json({
+            result: "I'm having a bit of trouble coming up with ideas right now. Could you tell me more about what kind of trip you're looking for?",
+            success: false,
+            error: error.message
+          });
+        }
+
+      } else if (tool_name === 'select_recommendation') {
+        // Handle when user selects a recommendation via voice
+        const { selection, destination } = parameters;
+        const phoneNumber = parameters.phone_number || metadata?.phone_number || metadata?.from;
+
+        console.log(`🎯 Processing recommendation selection: ${selection || destination}`);
+
+        try {
+          let selectedDestination = destination;
+
+          // If selection is a number, look up from session
+          if (!selectedDestination && phoneNumber) {
+            const session = await sessionManager.getSession(phoneNumber);
+            const recos = session.recoRecommendations || [];
+
+            if (selection && /^[123]$/.test(selection.toString())) {
+              const idx = parseInt(selection) - 1;
+              if (recos[idx]) {
+                selectedDestination = recos[idx].destination;
+              }
+            }
+          }
+
+          if (!selectedDestination) {
+            throw new Error('Could not determine selected destination');
+          }
+
+          // Update session with selected destination
+          if (phoneNumber) {
+            await sessionManager.updateSession(phoneNumber, {
+              recoMode: null,
+              recoPreferences: null,
+              recoRecommendations: null,
+              tripDetails: {
+                destination: selectedDestination
+              },
+              context: {
+                selectedFromRecommendations: true,
+                recoSelection: selectedDestination
+              }
+            });
+          }
+
+          const city = selectedDestination.split(',')[0];
+          res.json({
+            result: `${city} it is! Great choice. Now let's figure out the details. When are you thinking of going?`,
+            success: true,
+            destination: selectedDestination
+          });
+
+        } catch (error) {
+          console.error('Selection error:', error);
+          res.json({
+            result: "I didn't quite catch that. Which destination sounded good to you — number one, two, or three?",
+            success: false,
+            error: error.message
+          });
+        }
+
       } else {
         // Unknown tool
         console.log(`Unknown tool call: ${tool_name}`);
@@ -666,6 +816,55 @@ class WebhookController {
         console.error('Failed to send fallback SMS:', smsError);
       }
     }
+  }
+
+  /**
+   * Map voice vibe input to recommendation category
+   * @param {string} vibe - User's vibe description
+   * @returns {string} Category key
+   */
+  mapVibeToCategory(vibe) {
+    if (!vibe) return 'mixed';
+    const lower = vibe.toLowerCase();
+
+    if (/beach|relax|slow|chill|ocean|tropical|sun|water/i.test(lower)) return 'beach';
+    if (/city|urban|culture|museum|food|nightlife|buzz/i.test(lower)) return 'city';
+    if (/adventure|hik|mountain|nature|outdoor|wild|landscape/i.test(lower)) return 'adventure';
+    if (/history|ancient|traditional|heritage/i.test(lower)) return 'culture';
+
+    return 'mixed';
+  }
+
+  /**
+   * Map voice budget input to recommendation category
+   * @param {string} budget - User's budget description
+   * @returns {string} Category key
+   */
+  mapBudgetToCategory(budget) {
+    if (!budget) return 'moderate';
+    const lower = budget.toLowerCase();
+
+    if (/all[- ]?out|luxury|splurge|fancy|expensive|premium|high[- ]?end/i.test(lower)) return 'luxury';
+    if (/budget|cheap|economical|tight|limited|backpack|save/i.test(lower)) return 'budget';
+
+    return 'moderate';
+  }
+
+  /**
+   * Map travelers type to recommendation category
+   * @param {string} travelersType - Type of travelers
+   * @returns {string} Category key
+   */
+  mapTravelersToCategory(travelersType) {
+    if (!travelersType) return 'solo';
+    const lower = travelersType.toLowerCase();
+
+    if (/solo|alone|myself|just me/i.test(lower)) return 'solo';
+    if (/romantic|partner|couple|honeymoon|anniversary/i.test(lower)) return 'romantic';
+    if (/friend|group|crew|squad/i.test(lower)) return 'friends';
+    if (/family|kid|children/i.test(lower)) return 'family';
+
+    return 'solo';
   }
 
   /**

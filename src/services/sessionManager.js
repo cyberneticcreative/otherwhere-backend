@@ -73,6 +73,10 @@ class SessionManager {
       // Search flow tracking
       searchType: null, // 'flights' | 'accommodations' | 'both'
       flightsCompleted: false, // For "both" flow sequencing
+      // Recommendation mode state
+      recoMode: null, // null | 'asking_vibe' | 'asking_when' | 'asking_budget' | 'asking_who' | 'awaiting_selection' | 'rerolling'
+      recoPreferences: null, // { vibe, when, budget, who }
+      recoRecommendations: null, // Last generated recommendations
       createdAt: new Date().toISOString(),
       lastActivity: new Date().toISOString()
     };

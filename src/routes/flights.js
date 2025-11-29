@@ -6,7 +6,7 @@
 
 const express = require('express');
 const router = express.Router();
-const airlineDeeplinksService = require('../services/airlineDeeplinksService');
+const airlineDeeplinksService = require('../services/airlineDeepLinksService');
 
 /**
  * POST /flights/search

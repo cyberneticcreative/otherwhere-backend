@@ -32,6 +32,7 @@ async function getPreferences(phoneNumber) {
 
 /**
  * Create or update user preferences (upsert)
+ * Handles all preference fields including airline, airport, and timing preferences
  * @param {string} phoneNumber - User's phone number
  * @param {Object} preferencesData - Preferences data
  * @returns {Promise<Object>} Created/updated preferences
@@ -49,7 +50,16 @@ async function setPreferences(phoneNumber, preferencesData) {
   const {
     preferredClass,
     travelCreditCards,
-    prioritizeCardBenefits
+    prioritizeCardBenefits,
+    // New fields for fluid conversation
+    preferredAirlines,
+    avoidedAirlines,
+    preferredAirports,
+    avoidedAirports,
+    departureTimePreference,
+    maxStops,
+    connectionPreference,
+    budgetFlexibility
   } = preferencesData;
 
   // Check if preferences already exist
@@ -61,12 +71,20 @@ async function setPreferences(phoneNumber, preferencesData) {
   let result;
 
   if (existing.rows.length > 0) {
-    // Update existing preferences
+    // Update existing preferences - only update fields that are provided
     result = await db.query(
       `UPDATE user_preferences SET
         preferred_class = COALESCE($2, preferred_class),
         travel_credit_cards = COALESCE($3, travel_credit_cards),
         prioritize_card_benefits = COALESCE($4, prioritize_card_benefits),
+        preferred_airlines = COALESCE($5, preferred_airlines),
+        avoided_airlines = COALESCE($6, avoided_airlines),
+        preferred_airports = COALESCE($7, preferred_airports),
+        avoided_airports = COALESCE($8, avoided_airports),
+        departure_time_preference = COALESCE($9, departure_time_preference),
+        max_stops = COALESCE($10, max_stops),
+        connection_preference = COALESCE($11, connection_preference),
+        budget_flexibility = COALESCE($12, budget_flexibility),
         updated_at = NOW()
       WHERE user_id = $1
       RETURNING *`,
@@ -74,22 +92,40 @@ async function setPreferences(phoneNumber, preferencesData) {
         user.id,
         preferredClass,
         travelCreditCards,
-        prioritizeCardBenefits
+        prioritizeCardBenefits,
+        preferredAirlines,
+        avoidedAirlines,
+        preferredAirports,
+        avoidedAirports,
+        departureTimePreference,
+        maxStops,
+        connectionPreference,
+        budgetFlexibility
       ]
     );
     console.log(`✅ Updated preferences for ${phoneNumber}`);
   } else {
-    // Create new preferences
+    // Create new preferences with all fields
     result = await db.query(
       `INSERT INTO user_preferences (
-        user_id, preferred_class, travel_credit_cards, prioritize_card_benefits
-      ) VALUES ($1, $2, $3, $4)
+        user_id, preferred_class, travel_credit_cards, prioritize_card_benefits,
+        preferred_airlines, avoided_airlines, preferred_airports, avoided_airports,
+        departure_time_preference, max_stops, connection_preference, budget_flexibility
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
       RETURNING *`,
       [
         user.id,
         preferredClass || null,
         travelCreditCards || [],
-        prioritizeCardBenefits !== undefined ? prioritizeCardBenefits : false
+        prioritizeCardBenefits !== undefined ? prioritizeCardBenefits : false,
+        preferredAirlines || null,
+        avoidedAirlines || null,
+        preferredAirports || null,
+        avoidedAirports || null,
+        departureTimePreference || null,
+        maxStops !== undefined ? maxStops : null,
+        connectionPreference || null,
+        budgetFlexibility || null
       ]
     );
     console.log(`✅ Created preferences for ${phoneNumber}`);

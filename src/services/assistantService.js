@@ -43,7 +43,7 @@ class AssistantService {
       // Build context message if we have session context
       let contextMessage = '';
       if (options.sessionContext) {
-        const { lastFlightSearch, lastAccommodationSearch } = options.sessionContext;
+        const { lastFlightSearch, lastAccommodationSearch, userPreferences } = options.sessionContext;
 
         if (lastFlightSearch && lastFlightSearch.startDate) {
           contextMessage += `\n\n[CONTEXT: User just searched for flights from ${lastFlightSearch.origin} to ${lastFlightSearch.destination} for ${lastFlightSearch.startDate}`;
@@ -55,6 +55,22 @@ class AssistantService {
 
         if (lastAccommodationSearch && lastAccommodationSearch.checkIn) {
           contextMessage += `\n\n[CONTEXT: User previously searched accommodations for ${lastAccommodationSearch.checkIn} to ${lastAccommodationSearch.checkOut}]`;
+        }
+
+        // Add user preferences context if available
+        if (userPreferences) {
+          const prefParts = [];
+          if (userPreferences.preferredClass) prefParts.push(`cabin: ${userPreferences.preferredClass}`);
+          if (userPreferences.preferredAirlines?.length) prefParts.push(`prefers: ${userPreferences.preferredAirlines.join(', ')}`);
+          if (userPreferences.avoidedAirlines?.length) prefParts.push(`avoids: ${userPreferences.avoidedAirlines.join(', ')}`);
+          if (userPreferences.preferredAirports?.length) prefParts.push(`airports: ${userPreferences.preferredAirports.join(', ')}`);
+          if (userPreferences.avoidedAirports?.length) prefParts.push(`avoid airports: ${userPreferences.avoidedAirports.join(', ')}`);
+          if (userPreferences.departureTimePreference) prefParts.push(`timing: ${userPreferences.departureTimePreference}`);
+          if (userPreferences.maxStops !== undefined && userPreferences.maxStops !== null) prefParts.push(`max stops: ${userPreferences.maxStops}`);
+
+          if (prefParts.length > 0) {
+            contextMessage += `\n\n[USER PREFERENCES: ${prefParts.join(', ')}. Apply these to searches unless user specifies otherwise.]`;
+          }
         }
       }
 
